@@ -65,7 +65,7 @@ export function validateAndLoadConfig(): Config {
   const resumePath = requireEnv('RESUME_PATH');
   const resumeBase64 = optionalEnv('RESUME_BASE64');
 
-  const claudeModel = optionalEnv('CLAUDE_MODEL', 'claude-opus-4-7');
+  const claudeModel = optionalEnv('CLAUDE_MODEL', 'gemini-3.5-flash-lite');
   const claudeMaxTokens = parseInt(optionalEnv('CLAUDE_MAX_TOKENS', '4096'), 10);
   if (isNaN(claudeMaxTokens) || claudeMaxTokens < 1 || claudeMaxTokens > 32_000) {
     throw new Error('CLAUDE_MAX_TOKENS must be an integer between 1 and 32000');
@@ -128,14 +128,14 @@ export function validateAndLoadConfig(): Config {
       optionalEnv('JOB_TITLES', 'Senior Software Engineer'),
     ),
     locationPriority: parseCommaSeparated(
-      optionalEnv('LOCATION_PRIORITY', 'remote,washington,other'),
+      optionalEnv('LOCATION_PRIORITY', 'bangalore-ncr,remote,other'),
     ),
     locationKeywords: {
       remote: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_REMOTE', 'remote')),
       washington: parseCommaSeparated(
         optionalEnv(
           'LOCATION_KEYWORDS_WASHINGTON',
-          'seattle,bellevue,tacoma,redmond,renton,kirkland,sammamish,auburn,kent,des moines,washington,- wa',
+          'bangalore,bengaluru,karnataka,delhi,ncr,noida,gurgaon,gurugram,haryana,uttar pradesh',
         ),
       ),
       other: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_OTHER', '')),
@@ -149,12 +149,12 @@ export function validateAndLoadConfig(): Config {
       optionalEnv('PREFERRED_TECHNICAL_STACK', ''),
     ),
     jobFetchTime: optionalEnv('JOB_FETCH_TIME', '08:00'),
-    jobFetchTimezone: optionalEnv('JOB_FETCH_TIMEZONE', 'America/Los_Angeles'),
+    jobFetchTimezone: optionalEnv('JOB_FETCH_TIMEZONE', 'Asia/Kolkata'),
     weeklyDigestDay: optionalEnv('WEEKLY_DIGEST_DAY', 'sunday'),
     weeklyDigestTime: optionalEnv('WEEKLY_DIGEST_TIME', '18:00'),
     weeklyDigestTimezone: optionalEnv(
       'WEEKLY_DIGEST_TIMEZONE',
-      'America/Los_Angeles',
+      'Asia/Kolkata',
     ),
     enablePiiRedaction: optionalEnv('ENABLE_PII_REDACTION', 'true') !== 'false',
     additionalRedactionPatterns,

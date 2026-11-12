@@ -1,5 +1,4 @@
 import { callGeminiWithRetry } from '../utils/gemini-retry';
-import axios from 'axios';
 import {
   Job,
   JobAnalysis,
@@ -54,9 +53,11 @@ export class ClaudeAnalysisService {
     this.tokensCacheRead = 0;
   }
 
-  private async generateText(prompt: string, maxTokens = 700): Promise<string> {
-    const m = this.model || 'gemini-3.8-flash';
-    const res = await callGeminiWithRetry(this.apiKey, m,
+  private async generateText(prompt: string, maxTokens = 750): Promise<string> {
+    const m = this.model || 'gemini-3.5-flash-lite';
+    const res = await callGeminiWithRetry(
+      this.apiKey,
+      m,
       {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
@@ -82,8 +83,23 @@ export class ClaudeAnalysisService {
     userContext?: string,
     strategy?: string,
   ): Promise<JobAnalysisResult> {
-    const prompt = `Evaluate this job posting for Aditya Kumar (${yearsExperience} yrs experience at Amazon India & Seattle; stack: ${preferredStack.join(', ')}).
-${userContext ? `USER RULES: ${userContext}\n` : ''}${strategy ? `STRATEGY: ${strategy}\n` : ''}
+    const appliedSignal =
+      appliedJobs.length > 0
+        ? `RECENTLY APPLIED ROLES (boost similar seniority/domain): ${appliedJobs
+            .slice(0, 8)
+            .map((a) => `${a.title} at ${a.company}`)
+            .join('; ')}\n`
+        : '';
+    const memorySignal =
+      memory.length > 0
+        ? `LEARNED PREFERENCES: ${memory
+            .slice(0, 8)
+            .map((m) => m.patternName)
+            .join(', ')}\n`
+        : '';
+
+    const prompt = `Evaluate this job posting for a Senior/Staff Backend Engineer (${yearsExperience} yrs experience; preferred stack: ${preferredStack.join(', ')}).
+${userContext ? `USER RULES: ${userContext}\n` : ''}${strategy ? `STRATEGY: ${strategy}\n` : ''}${appliedSignal}${memorySignal}
 CANDIDATE RESUME:
 ${resume}
 
@@ -96,22 +112,22 @@ Direct ATS URL: ${job.applyUrl}
 Description: ${extractRelevantSections(job.description, this.descMaxChars)}
 
 SCORING & FILTERING RULES:
-1. STRICTLY REJECT (score 0-25, category "skip") any Engineering Manager, people-management, Frontend/Mobile-only, or junior (<5 yrs) roles.
-2. PRIORITIZE pure Individual Contributor (IC) Backend / Distributed Systems roles (SDE-3, Senior SDE, Staff SDE, Lead SDE) at top-paying product/FAANG/fintech companies (>= 40 LPA base).
+1. STRICTLY REJECT (score 0-25, category "skip") any Engineering Manager, people-management, Frontend/Mobile-only, QA/Support, or junior (<5 yrs) roles.
+2. PRIORITIZE pure Individual Contributor (IC) Backend / Distributed Systems roles (SDE-3, Senior SDE, Staff SDE, Lead SDE) at high-paying product, cloud, or fintech companies.
 3. LOCATION RANKING: Boost Bangalore & Delhi-NCR (Noida/Gurgaon) highest (+10), then Remote India (+7), then Hyderabad & Pune (+5).
-4. In "insights", explicitly list: (a) ATS Req ID & direct URL for referral outreach, and (b) Top 5-8 missing JD keywords to add to Aditya's Overleaf LaTeX resume.
+4. In "insights", explicitly list: (a) ATS Req ID & direct URL for referral outreach, and (b) Top 5-8 missing JD keywords to add to the candidate's LaTeX resume.
 
 Respond with ONLY valid JSON:
 {
   "relevanceScore": <0-100>,
   "interviewChance": <0-100>,
   "overallCategory": "auto-flag" | "maybe-flag" | "skip",
-  "relevanceReasoning": "<concise 1-sentence fit & comp/level assessment>",
+  "relevanceReasoning": "<concise 1-sentence fit & level assessment>",
   "insights": "Req ID: ${job.externalId} | Missing LaTeX keywords: <comma-separated keywords>",
   "matchedPatterns": ["<matched skill or signal>"]
 }`;
 
-    const text = await this.generateText(prompt, 700);
+    const text = await this.generateText(prompt, 750);
     const raw = extractJson<{
       relevanceScore: number;
       interviewChance: number;
@@ -141,12 +157,20 @@ Respond with ONLY valid JSON:
     resume: string,
     focusPatterns: string[] = [],
   ): Promise<CoverLetterResult> {
-    const prompt = `Write a short warm-referral message and cover note for ${input.title} at ${input.company}, grounded in this resume:
+    const prompt = `Draft high-conversion referral outreach notes for ${input.title} at ${input.company}, grounded strictly in this redacted resume:
 ${resume}
-Fit: ${input.relevanceReasoning ?? ''} | Focus: ${focusPatterns.join(', ')}
+
+Match Analysis: ${input.relevanceReasoning ?? ''}
+Details & Req ID: ${input.insights ?? ''}
+Focus Areas: ${focusPatterns.join(', ')}
+
 Respond with ONLY valid JSON:
-{ "opening": "<referral ping>", "body": "<impact summary>", "closing": "<call to action>" }`;
-    const text = await this.generateText(prompt, 700);
+{
+  "opening": "<LinkedIn connection/referral note under 280 characters including the exact Req ID if present>",
+  "body": "<3 concise bullet points highlighting quantified distributed systems, backend scale, and tech stack fit from the resume>",
+  "closing": "<2-sentence direct email/DM referral ask with clear call to action>"
+}`;
+    const text = await this.generateText(prompt, 750);
     return extractJson<CoverLetterResult>(text);
   }
 
@@ -160,13 +184,41 @@ Respond with ONLY valid JSON:
     return new Map();
   }
 
-  async learnPatterns(analyses: JobAnalysis[], _appliedJobs?: unknown[]): Promise<PatternLearning> {
-    const allPatterns = analyses.flatMap((a) => a.matched_patterns ?? []);
-    const unique = [...new Set(allPatterns)].slice(0, 8);
+  async learnPatterns(
+    analyses: JobAnalysis[],
+    appliedJobs: { title: string; company: string }[] = [],
+  ): Promise<PatternLearning> {
+    const appliedCompanies = new Set(appliedJobs.map((a) => a.company.toLowerCase()));
+    const skillCounts = new Map<string, number>();
+    const gapCounts = new Map<string, number>();
+
+    for (const a of analyses) {
+      const weight = appliedCompanies.has((a as any).company?.toLowerCase?.() ?? '') ? 3 : a.relevance_score >= 75 ? 2 : 1;
+      for (const p of a.matched_patterns ?? []) {
+        skillCounts.set(p, (skillCounts.get(p) ?? 0) + weight);
+      }
+      if (a.relevance_score >= 70 && a.insights?.includes('Missing LaTeX keywords:')) {
+        const rawGaps = a.insights.split('Missing LaTeX keywords:')[1] ?? '';
+        for (const g of rawGaps.split(',').map((s) => s.trim()).filter((s) => s && s.length < 40)) {
+          gapCounts.set(g, (gapCounts.get(g) ?? 0) + 1);
+        }
+      }
+    }
+
+    const topSkillsMatched = [...skillCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([k]) => k);
+
+    const commonGaps = [...gapCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([k]) => k);
+
     return {
-      topSkillsMatched: unique.slice(0, 5),
-      commonGaps: [],
-      recommendedFocus: ['Distributed Systems', 'Java/Spring Boot', 'High-Throughput Event Streams'],
+      topSkillsMatched: topSkillsMatched.length > 0 ? topSkillsMatched : ['Java', 'Distributed Systems', 'AWS', 'Microservices'],
+      commonGaps,
+      recommendedFocus: ['Distributed Systems', 'Java / Spring Boot', 'Event-Driven Architecture', 'Payment & Ledger Systems'],
       bestJobCategories: ['SDE-3 / Senior Backend IC', 'Staff Software Engineer'],
     };
   }

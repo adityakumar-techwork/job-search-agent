@@ -9,6 +9,7 @@ import { Config } from '../types';
 // Proactive validation ensures we never exceed margin
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config();
 
 function requireEnv(key: string): string {
   const value = process.env[key];

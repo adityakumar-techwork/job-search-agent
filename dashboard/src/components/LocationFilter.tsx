@@ -6,7 +6,7 @@ interface Props {
 const options = [
   { value: 'all', label: 'All locations' },
   { value: 'remote', label: 'Remote' },
-  { value: 'washington', label: 'Washington' },
+  { value: 'bangalore-ncr', label: 'Bangalore / NCR' },
   { value: 'other', label: 'Other' },
 ];
 

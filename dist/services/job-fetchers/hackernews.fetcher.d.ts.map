@@ -1,0 +1,1 @@
+{"version":3,"file":"hackernews.fetcher.d.ts","sourceRoot":"","sources":["../../../src/services/job-fetchers/hackernews.fetcher.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,GAAG,EAAE,UAAU,EAAE,cAAc,EAAE,MAAM,aAAa,CAAC;AAG9D,qBAAa,wBAAyB,YAAW,UAAU;IACnD,KAAK,CAAC,QAAQ,EAAE,cAAc,GAAG,OAAO,CAAC,GAAG,EAAE,CAAC;CAuCtD"}

@@ -101,7 +101,7 @@ export interface Job {
 }
 
 export type OverallCategory = 'auto-flag' | 'maybe-flag' | 'needs-review' | 'skip';
-export type LocationCategory = 'remote' | 'washington' | 'other';
+export type LocationCategory = 'bangalore-ncr' | 'remote' | 'washington' | 'other';
 export type AnalysisCategory = 'auto-flag' | 'maybe-flag' | 'skip';
 
 export interface JobAnalysisResult {

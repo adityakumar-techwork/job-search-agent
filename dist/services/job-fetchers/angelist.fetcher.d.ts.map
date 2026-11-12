@@ -1,0 +1,1 @@
+{"version":3,"file":"angelist.fetcher.d.ts","sourceRoot":"","sources":["../../../src/services/job-fetchers/angelist.fetcher.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,GAAG,EAAE,UAAU,EAAE,cAAc,EAAE,MAAM,aAAa,CAAC;AAM9D,qBAAa,gBAAiB,YAAW,UAAU;IAC3C,KAAK,CAAC,QAAQ,EAAE,cAAc,GAAG,OAAO,CAAC,GAAG,EAAE,CAAC;CAsDtD"}

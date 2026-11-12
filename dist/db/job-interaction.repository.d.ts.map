@@ -1,0 +1,1 @@
+{"version":3,"file":"job-interaction.repository.d.ts","sourceRoot":"","sources":["../../src/db/job-interaction.repository.ts"],"names":[],"mappings":"AAEA,qBAAa,wBAAwB;IAC7B,cAAc,CAAC,KAAK,EAAE,MAAM,EAAE,IAAI,EAAE,OAAO,GAAG,gBAAgB,EAAE,MAAM,EAAE,OAAO,GAAG,OAAO,CAAC,IAAI,CAAC;CAgBtG"}

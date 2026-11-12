@@ -149,14 +149,14 @@ export class JSearchFetcher implements JobFetcher {
     const loc = (location ?? '').toLowerCase();
     const kw: LocationKeywords = locationKeywords ?? {
       remote: ['remote'],
-      washington: ['washington', 'seattle', '- wa'],
+      washington: ['bangalore-ncr', 'seattle', '- wa'],
       other: [],
     };
     // Remote is a work arrangement, not a place — check location, title, and the API's is_remote flag
     const remoteTarget = `${loc} ${title.toLowerCase()}`;
     if (isRemoteFlag || kw.remote.some((k) => remoteTarget.includes(k))) return 'remote';
     // Washington/other are geographic — only check location string
-    if (kw.washington.some((k) => loc.includes(k))) return 'washington';
+    if ([...kw.washington, ...['bangalore','bengaluru','karnataka','delhi','ncr','noida','gurgaon','gurugram','haryana','uttar pradesh']].some((k) => loc.includes(k))) return 'bangalore-ncr';
     if (kw.other.length > 0 && kw.other.some((k) => loc.includes(k))) return 'other';
     return 'other';
   }

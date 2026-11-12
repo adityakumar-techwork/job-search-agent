@@ -36,8 +36,8 @@ function validateDatabaseUrl(url: string): void {
 }
 
 function validateClaudeApiKey(key: string): void {
-  if (!key.startsWith('sk-ant-')) {
-    throw new Error('CLAUDE_API_KEY must start with sk-ant-');
+  if (key.length < 10) {
+    throw new Error('CLAUDE_API_KEY is invalid');
   }
 }
 

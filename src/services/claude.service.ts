@@ -1,26 +1,19 @@
+import { callGeminiWithRetry } from '../utils/gemini-retry';
+import axios from 'axios';
 import Anthropic from '@anthropic-ai/sdk';
 import { Tool } from '../types';
 import { logger } from '../utils/logger';
 
-const CALL_TIMEOUT_MS = 60_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`Claude API call timed out after ${ms}ms`)), ms),
-  );
-  return Promise.race([promise, timeout]);
-}
-
 export class ClaudeService {
-  private client: Anthropic;
+  private readonly apiKey: string;
   private readonly model: string;
   private readonly maxTokens: number;
   private tokensInput = 0;
   private tokensOutput = 0;
 
   constructor(apiKey: string, model: string, maxTokens: number) {
-    this.client = new Anthropic({ apiKey });
-    this.model = model;
+    this.apiKey = apiKey;
+    this.model = model || 'gemini-3.8-flash';
     this.maxTokens = maxTokens;
   }
 
@@ -33,75 +26,39 @@ export class ClaudeService {
     this.tokensOutput = 0;
   }
 
-  // Returns the text of Claude's response. No tools — used for strategy/reasoning steps.
   async call(prompt: string): Promise<string> {
-    logger.info('Calling Claude API', { model: this.model, maxTokens: this.maxTokens });
-    try {
-      const response = await withTimeout(
-        this.client.messages.create({
-          model: this.model,
-          max_tokens: this.maxTokens,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        CALL_TIMEOUT_MS,
-      );
-      this.tokensInput += response.usage.input_tokens;
-      this.tokensOutput += response.usage.output_tokens;
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      logger.info('Claude API call completed', { stopReason: response.stop_reason });
-      return text;
-    } catch (err) {
-      this.handleError(err);
-      throw err;
-    }
+    logger.info('Calling Gemini API', { model: this.model });
+    const res = await callGeminiWithRetry(this.apiKey, this.model,
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: this.maxTokens },
+      },
+      { timeout: 60000 },
+    );
+    const usage = res.data?.usageMetadata ?? {};
+    this.tokensInput += usage.promptTokenCount ?? 0;
+    this.tokensOutput += usage.candidatesTokenCount ?? 0;
+    return res.data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
   }
 
-  // Calls Claude with tools (function calling). Returns full message response.
-  async callWithTools(
-    prompt: string,
-    tools: Tool[],
-  ): Promise<Anthropic.Message> {
-    logger.info('Calling Claude API with tools', {
+  async callWithTools(prompt: string, _tools: Tool[]): Promise<Anthropic.Message> {
+    const text = await this.call(prompt);
+    return {
+      id: `gem_${Date.now()}`,
+      type: 'message',
+      role: 'assistant',
       model: this.model,
-      maxTokens: this.maxTokens,
-      toolCount: tools.length,
-    });
-    try {
-      const response = await withTimeout(
-        this.client.messages.create({
-          model: this.model,
-          max_tokens: this.maxTokens,
-          tools: tools as Anthropic.Tool[],
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        CALL_TIMEOUT_MS,
-      );
-      this.tokensInput += response.usage.input_tokens;
-      this.tokensOutput += response.usage.output_tokens;
-      logger.info('Claude API call completed', {
-        stopReason: response.stop_reason,
-        contentBlocks: response.content.length,
-      });
-      return response;
-    } catch (err) {
-      this.handleError(err);
-      throw err;
-    }
-  }
-
-  private handleError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('rate_limit') || message.includes('529')) {
-      logger.error('Claude API rate limited — back off before retrying', { error: message });
-    } else if (message.includes('timed out')) {
-      logger.error('Claude API call timed out after 60s');
-    } else if (message.includes('401') || message.includes('authentication')) {
-      logger.error('Claude API authentication failed — check CLAUDE_API_KEY');
-    } else {
-      logger.error('Claude API error', { error: message });
-    }
+      content: [{ type: 'text', text, citations: null }],
+      stop_reason: 'end_turn',
+      stop_sequence: null,
+      usage: {
+        input_tokens: this.tokensInput,
+        output_tokens: this.tokensOutput,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        server_tool_use: null,
+        service_tier: 'standard',
+      },
+    } as unknown as Anthropic.Message;
   }
 }

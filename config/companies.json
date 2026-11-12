@@ -1,28 +1,20 @@
-{
-  "greenhouse": [
-    "stripe",
-    "rubrik",
-    "rippling",
-    "coinbase",
-    "confluent",
-    "glean",
-    "razorpay",
-    "cred",
-    "meesho",
-    "browserstack",
-    "postman",
-    "phonepe",
-    "groww",
-    "databricks",
-    "swiggy",
-    "zomato"
-  ],
-  "lever": [
-    "atlassian",
-    "plaid",
-    "wealthsimple",
-    "binance",
-    "coupa",
-    "sentinelone"
-  ]
-}
+[
+  { "name": "Stripe", "provider": "greenhouse", "slug": "stripe" },
+  { "name": "Rubrik", "provider": "greenhouse", "slug": "rubrik" },
+  { "name": "Coinbase", "provider": "greenhouse", "slug": "coinbase" },
+  { "name": "Databricks", "provider": "greenhouse", "slug": "databricks" },
+  { "name": "Groww", "provider": "greenhouse", "slug": "groww" },
+  { "name": "ThoughtSpot", "provider": "greenhouse", "slug": "thoughtspot" },
+  { "name": "Twilio", "provider": "greenhouse", "slug": "twilio" },
+  { "name": "Okta", "provider": "greenhouse", "slug": "okta" },
+  { "name": "Zscaler", "provider": "greenhouse", "slug": "zscaler" },
+  { "name": "Toast", "provider": "greenhouse", "slug": "toast" },
+  { "name": "Tekion", "provider": "greenhouse", "slug": "tekion" },
+  { "name": "Harness", "provider": "greenhouse", "slug": "harness" },
+  { "name": "Nutanix", "provider": "greenhouse", "slug": "nutanix" },
+  { "name": "Airbnb", "provider": "greenhouse", "slug": "airbnb" },
+  { "name": "Coupa", "provider": "lever", "slug": "coupa" },
+  { "name": "Zoox", "provider": "lever", "slug": "zoox" },
+  { "name": "Veeva", "provider": "lever", "slug": "veeva" },
+  { "name": "Paytm", "provider": "lever", "slug": "paytm" }
+]

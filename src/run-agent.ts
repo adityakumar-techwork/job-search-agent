@@ -11,6 +11,7 @@ import { ClaudeAnalysisService } from './services/claude-analysis.service';
 import { JSearchFetcher } from './services/job-fetchers/jsearch.fetcher';
 import { GreenhouseFetcher } from './services/job-fetchers/greenhouse.fetcher';
 import { LeverFetcher } from './services/job-fetchers/lever.fetcher';
+import { AshbyFetcher } from './services/job-fetchers/ashby.fetcher';
 import { loadJSearchConfig } from './config/jsearch.config';
 import { loadCompanies } from './config/companies.config';
 import { ResumeRepository } from './db/resume.repository';
@@ -72,6 +73,7 @@ async function main(): Promise<void> {
       // Greenhouse runs on the days JSearch does not, so each lane gets the full analysis budget.
       new GreenhouseFetcher(loadCompanies(), 250, []),
       new LeverFetcher(loadCompanies()),
+      new AshbyFetcher(loadCompanies()),
     ],
     jobRepository,
   );

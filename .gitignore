@@ -9,3 +9,6 @@ node_modules/
 .vscode/
 .DS_Store
 .env*
+data/*
+!data/resume.example.txt
+dist/

@@ -1,1 +1,0 @@
-{"version":3,"file":"jsearch.config.d.ts","sourceRoot":"","sources":["../../src/config/jsearch.config.ts"],"names":[],"mappings":"AAMA,MAAM,WAAW,aAAa;IAI5B,OAAO,EAAE,MAAM,EAAE,CAAC;IAGlB,UAAU,EAAE,MAAM,CAAC;IAEnB,iBAAiB,EAAE,MAAM,CAAC;IAE1B,UAAU,EAAE,MAAM,CAAC;IAGnB,SAAS,EAAE,MAAM,EAAE,CAAC;CACrB;AAUD,wBAAgB,iBAAiB,IAAI,aAAa,CAiBjD"}

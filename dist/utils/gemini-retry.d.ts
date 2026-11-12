@@ -1,2 +1,0 @@
-export declare function callGeminiWithRetry(apiKey: string, _primaryModel: string, body: unknown, _opts?: unknown): Promise<import("axios").AxiosResponse<any, unknown, {}, any>>;
-//# sourceMappingURL=gemini-retry.d.ts.map

@@ -1,0 +1,56 @@
+{
+  "name": "job-search-agent",
+  "version": "1.0.0",
+  "description": "Persistent autonomous job search agent with PII redaction",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "test": "jest --runInBand --forceExit",
+    "test:coverage": "jest --runInBand --forceExit --coverage",
+    "pipeline": "ts-node src/test-full-pipeline.ts",
+    "agent": "ts-node src/run-agent.ts",
+    "digest": "ts-node src/send-digest.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
+    "axios": "^1.16.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "form-data": "^4.0.5",
+    "mailgun.js": "^13.0.1",
+    "pdf-parse": "^1.1.4",
+    "pg": "^8.12.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "@types/supertest": "^7.2.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.1.5"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.ts"
+    ],
+    "setupFiles": [
+      "<rootDir>/tests/jest.setup.ts"
+    ],
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.test.json"
+        }
+      ]
+    }
+  }
+}

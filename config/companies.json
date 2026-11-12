@@ -1,0 +1,28 @@
+{
+  "greenhouse": [
+    "stripe",
+    "rubrik",
+    "rippling",
+    "coinbase",
+    "confluent",
+    "glean",
+    "razorpay",
+    "cred",
+    "meesho",
+    "browserstack",
+    "postman",
+    "phonepe",
+    "groww",
+    "databricks",
+    "swiggy",
+    "zomato"
+  ],
+  "lever": [
+    "atlassian",
+    "plaid",
+    "wealthsimple",
+    "binance",
+    "coupa",
+    "sentinelone"
+  ]
+}

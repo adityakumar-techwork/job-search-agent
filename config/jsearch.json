@@ -1,0 +1,27 @@
+{
+  "queries": [
+    "Senior Software Engineer Backend Bengaluru",
+    "SDE 3 Backend Bengaluru",
+    "Staff Software Engineer Backend Bengaluru",
+    "Senior Software Engineer Backend Gurgaon Noida Delhi NCR",
+    "SDE 3 Backend Gurgaon Noida",
+    "Senior Software Engineer Backend Remote India",
+    "Staff Software Engineer Remote India",
+    "Senior Software Engineer Backend Hyderabad",
+    "Senior Software Engineer Backend Pune"
+  ],
+  "date_posted": "3days",
+  "num_pages": 1,
+  "exclude_titles": [
+    "Engineering Manager",
+    "Manager",
+    "Director",
+    "VP",
+    "Frontend",
+    "iOS",
+    "Android",
+    "Intern",
+    "SDE 1",
+    "SDE-1"
+  ]
+}

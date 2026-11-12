@@ -1,0 +1,10 @@
+.env
+*.pem
+target/
+__pycache__/
+*.pyc
+venv/
+node_modules/
+.idea/
+.vscode/
+.DS_Store

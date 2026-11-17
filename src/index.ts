@@ -46,9 +46,12 @@ async function main(): Promise<void> {
     });
 
     logger.info('System ready');
+    server.ref();
+    const keepAliveTimer = setInterval(() => {}, 2147483647);
 
     async function shutdown(signal: string): Promise<void> {
       logger.info(`${signal} received — shutting down`);
+      clearInterval(keepAliveTimer);
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await closePool();
       process.exit(0);

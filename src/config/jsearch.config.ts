@@ -19,6 +19,8 @@ export interface JSearchConfig {
   // Location search terms (e.g. 'remote', 'Seattle, WA', 'US'). Distinct from LOCATION_PRIORITY,
   // which is the analysis-side bucketing.
   locations: string[];
+  // ISO 3166-1 alpha-2 country code JSearch searches in (e.g. 'in', 'us').
+  country: string;
 }
 
 const DEFAULTS: JSearchConfig = {
@@ -26,7 +28,8 @@ const DEFAULTS: JSearchConfig = {
   datePosted: 'week',
   maxRequestsPerRun: 15,
   minReserve: 20,
-  locations: ['remote', 'Seattle, WA', 'US'],
+  locations: ['Bengaluru, India', 'Gurgaon, India', 'Noida, India', 'Remote, India'],
+  country: 'in',
 };
 
 export function loadJSearchConfig(): JSearchConfig {
@@ -41,6 +44,10 @@ export function loadJSearchConfig(): JSearchConfig {
       maxRequestsPerRun: isPositiveNumber(parsed.maxRequestsPerRun) ? parsed.maxRequestsPerRun : DEFAULTS.maxRequestsPerRun,
       minReserve: isPositiveNumber(parsed.minReserve) ? parsed.minReserve : DEFAULTS.minReserve,
       locations: isStringArray(parsed.locations) ? parsed.locations : DEFAULTS.locations,
+      country:
+        typeof parsed.country === 'string' && /^[a-z]{2}$/i.test(parsed.country)
+          ? parsed.country.toLowerCase()
+          : DEFAULTS.country,
     };
   } catch {
     logger.warn('config/jsearch.json missing or invalid — using built-in JSearch defaults');

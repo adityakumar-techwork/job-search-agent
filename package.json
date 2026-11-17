@@ -5,15 +5,16 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.test.json",
     "start": "ts-node src/index.ts",
+    "start:prod": "node dist/index.js",
     "test": "jest --runInBand --forceExit",
     "test:coverage": "jest --runInBand --forceExit --coverage",
-    "pipeline": "ts-node src/test-full-pipeline.ts",
+    "db:migrate": "ts-node src/db/migrate.ts",
     "agent": "ts-node src/run-agent.ts",
     "digest": "ts-node src/send-digest.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.95.2",
     "axios": "^1.16.0",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
@@ -52,5 +53,8 @@
         }
       ]
     }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

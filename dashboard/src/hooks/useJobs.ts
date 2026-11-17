@@ -9,7 +9,6 @@ export function useJobs() {
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
     getAllAnalyses(100)
       .then(({ analyses: data }) => {
         if (!cancelled) {

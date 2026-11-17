@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { JSearchFetcher, capTerms } from '../src/services/job-fetchers/jsearch.fetcher';
-import { GreenhouseFetcher, titleMatches, htmlToText, isUsLocation } from '../src/services/job-fetchers/greenhouse.fetcher';
+import { GreenhouseFetcher, titleMatches, htmlToText, isIndiaOrRemoteLocation } from '../src/services/job-fetchers/greenhouse.fetcher';
 import type { JSearchConfig } from '../src/config/jsearch.config';
 import type { Company } from '../src/config/companies.config';
 import { HackerNewsAlgoliaFetcher } from '../src/services/job-fetchers/hackernews.fetcher';
@@ -39,13 +39,13 @@ function axiosError(status: number, message = 'Axios error') {
 
 const locationKeywords = {
   remote: ['remote'],
-  washington: ['seattle', 'bellevue', 'tacoma', 'redmond', 'renton', 'kirkland', 'sammamish', 'auburn', 'kent', 'des moines', 'washington', '- wa'],
+  hub: ['bangalore', 'bengaluru', 'karnataka', 'delhi', 'ncr', 'noida', 'gurgaon', 'gurugram', 'haryana'],
   other: [] as string[],
 };
 
 const criteria: SearchCriteria = {
   jobTitles: ['Senior Software Engineer', 'Staff Software Engineer'],
-  locationPriority: ['remote', 'washington'],
+  locationPriority: ['bangalore-ncr', 'remote'],
   yearsExperience: 7,
   preferredStack: ['java', 'spring boot', 'kafka'],
   locationKeywords,
@@ -61,6 +61,7 @@ const jsearchConfig: JSearchConfig = {
   maxRequestsPerRun: 15,
   minReserve: 5,
   locations: ['remote'],
+  country: 'in',
 };
 
 // One title × one location = a single request, so a single mocked response maps to a single job.
@@ -78,8 +79,9 @@ describe('JSearchFetcher', () => {
             job_title: 'Senior Software Engineer',
             employer_name: 'Stripe',
             job_description: 'Java, Kafka, distributed systems',
-            job_country: 'US',
-            job_state: 'CA',
+            job_city: 'Bengaluru',
+            job_country: 'IN',
+            job_state: 'KA',
             job_min_salary: 150000,
             job_max_salary: 200000,
             salary_currency: 'USD',
@@ -101,6 +103,10 @@ describe('JSearchFetcher', () => {
     expect(jobs[0].salaryMin).toBe(150000);
     expect(jobs[0].applyUrl).toBe('https://stripe.com/jobs/1');
     expect(jobs[0].isActive).toBe(true);
+    expect(jobs[0].location).toBe('Bengaluru, KA, IN');
+    expect(jobs[0].locationCategory).toBe('bangalore-ncr');
+    // Searches the configured country, not a hardcoded 'us'.
+    expect(axiosGetSpy.mock.calls[0][1].params.country).toBe('in');
   });
 
   it('parses recruiter and company fields when present in JSearch response', async () => {
@@ -179,21 +185,23 @@ describe('JSearchFetcher', () => {
             job_apply_link: 'https://acme.com/jobs/r',
           },
           {
-            job_id: 'j-bellevue',
+            job_id: 'j-noida',
             job_title: 'SWE',
             employer_name: 'Contoso',
             job_description: 'desc',
-            job_country: 'US',
-            job_state: 'WA',
+            job_city: 'Noida',
+            job_country: 'IN',
+            job_state: 'UP',
             job_apply_link: 'https://contoso.com/jobs/b',
           },
           {
-            job_id: 'j-ny',
+            job_id: 'j-pune',
             job_title: 'SWE',
             employer_name: 'BigCo',
             job_description: 'desc',
-            job_country: 'US',
-            job_state: 'NY',
+            job_city: 'Pune',
+            job_country: 'IN',
+            job_state: 'MH',
             job_apply_link: 'https://bigco.com/jobs/n',
           },
         ],
@@ -205,8 +213,8 @@ describe('JSearchFetcher', () => {
 
     expect(jobs).toHaveLength(3);
     expect(jobs.find((j) => j.externalId === 'j-remote')?.locationCategory).toBe('remote');
-    expect(jobs.find((j) => j.externalId === 'j-bellevue')?.locationCategory).toBe('washington');
-    expect(jobs.find((j) => j.externalId === 'j-ny')?.locationCategory).toBe('other');
+    expect(jobs.find((j) => j.externalId === 'j-noida')?.locationCategory).toBe('bangalore-ncr');
+    expect(jobs.find((j) => j.externalId === 'j-pune')?.locationCategory).toBe('other');
   });
 
   it('returns [] and logs a warning on 429 rate limit', async () => {
@@ -434,7 +442,7 @@ describe('GreenhouseFetcher', () => {
       {
         id: 900001,
         title: 'Senior Software Engineer',
-        location: { name: 'Remote' },
+        location: { name: 'Bengaluru, India' },
         content: '&lt;p&gt;Build &amp; scale systems&lt;/p&gt;',
         absolute_url: 'https://boards.greenhouse.io/acme/jobs/900001',
         updated_at: '2026-08-01T00:00:00Z',
@@ -454,9 +462,9 @@ describe('GreenhouseFetcher', () => {
 
   it('filters out non-engineering roles by title', async () => {
     axiosGetSpy.mockResolvedValue(boardResponse([
-      { id: 1, title: 'Staff Software Engineer', location: { name: 'Remote' }, content: 'x', absolute_url: 'u1' },
-      { id: 2, title: 'Account Executive', location: { name: 'NYC' }, content: 'x', absolute_url: 'u2' },
-      { id: 3, title: 'Technical Recruiter', location: { name: 'SF' }, content: 'x', absolute_url: 'u3' },
+      { id: 1, title: 'Staff Software Engineer', location: { name: 'Gurugram, India' }, content: 'x', absolute_url: 'u1' },
+      { id: 2, title: 'Account Executive', location: { name: 'Bengaluru' }, content: 'x', absolute_url: 'u2' },
+      { id: 3, title: 'Technical Recruiter', location: { name: 'Noida' }, content: 'x', absolute_url: 'u3' },
     ]));
 
     const jobs = await new GreenhouseFetcher(companies, 0).fetch(criteria);
@@ -465,14 +473,14 @@ describe('GreenhouseFetcher', () => {
     expect(jobs[0].title).toBe('Staff Software Engineer');
   });
 
-  it('drops non-US roles and keeps US / ambiguous-remote ones', async () => {
+  it('keeps India / remote-India roles and drops the rest', async () => {
     axiosGetSpy.mockResolvedValue(boardResponse([
-      { id: 1, title: 'Software Engineer', location: { name: 'Bellevue, WA' }, content: 'x', absolute_url: 'u1' },
-      { id: 2, title: 'Software Engineer', location: { name: 'Remote - United States' }, content: 'x', absolute_url: 'u2' },
-      { id: 3, title: 'Software Engineer', location: { name: 'Remote' }, content: 'x', absolute_url: 'u3' }, // ambiguous → kept
-      { id: 4, title: 'Software Engineer', location: { name: 'London, UK; San Francisco, CA' }, content: 'x', absolute_url: 'u4' }, // has US → kept
-      { id: 5, title: 'Software Engineer', location: { name: 'Remote Poland' }, content: 'x', absolute_url: 'u5' },
-      { id: 6, title: 'Software Engineer', location: { name: 'Toronto, Canada' }, content: 'x', absolute_url: 'u6' },
+      { id: 1, title: 'Software Engineer', location: { name: 'Bengaluru, Karnataka, India' }, content: 'x', absolute_url: 'u1' },
+      { id: 2, title: 'Software Engineer', location: { name: 'Remote - India' }, content: 'x', absolute_url: 'u2' },
+      { id: 3, title: 'Software Engineer', location: { name: 'London, UK; Gurgaon, India' }, content: 'x', absolute_url: 'u3' },
+      { id: 4, title: 'Software Engineer', location: { name: 'Remote - APAC' }, content: 'x', absolute_url: 'u4' },
+      { id: 5, title: 'Software Engineer', location: { name: 'Remote' }, content: 'x', absolute_url: 'u5' }, // usually US-only → dropped
+      { id: 6, title: 'Software Engineer', location: { name: 'Seattle, WA' }, content: 'x', absolute_url: 'u6' },
       { id: 7, title: 'Software Engineer', location: { name: 'Remote - United Kingdom' }, content: 'x', absolute_url: 'u7' },
     ]));
 
@@ -481,18 +489,15 @@ describe('GreenhouseFetcher', () => {
     expect(jobs.map((j) => j.externalId).sort()).toEqual(['1', '2', '3', '4']);
   });
 
-  it('classifies locations as US or non-US', () => {
-    expect(isUsLocation('Bellevue, WA')).toBe(true);
-    expect(isUsLocation('Menlo Park, CA; New York, NY')).toBe(true);
-    expect(isUsLocation('Remote - USA')).toBe(true);
-    expect(isUsLocation('Remote')).toBe(true); // ambiguous → keep
-    expect(isUsLocation(undefined)).toBe(true);
-    expect(isUsLocation('London, UK; San Francisco, CA')).toBe(true); // US option present
-    expect(isUsLocation('Remote Poland')).toBe(false);
-    expect(isUsLocation('Toronto, Canada')).toBe(false);
-    expect(isUsLocation('Remote - Ontario, Canada')).toBe(false);
-    expect(isUsLocation('Bangalore, India')).toBe(false);
-    expect(isUsLocation('Remote - United Kingdom')).toBe(false);
+  it('classifies India / remote-India locations', () => {
+    expect(isIndiaOrRemoteLocation('Bangalore, India')).toBe(true);
+    expect(isIndiaOrRemoteLocation('Noida')).toBe(true);
+    expect(isIndiaOrRemoteLocation('Hyderabad, Telangana')).toBe(true);
+    expect(isIndiaOrRemoteLocation('Remote, India')).toBe(true);
+    expect(isIndiaOrRemoteLocation('Remote - APAC')).toBe(true);
+    expect(isIndiaOrRemoteLocation('Remote')).toBe(false);
+    expect(isIndiaOrRemoteLocation(undefined)).toBe(false);
+    expect(isIndiaOrRemoteLocation('Toronto, Canada')).toBe(false);
   });
 
   it('skips a dead slug (404) and continues with the next board', async () => {
@@ -503,7 +508,7 @@ describe('GreenhouseFetcher', () => {
     axiosGetSpy
       .mockRejectedValueOnce(axiosError(404, 'Not Found'))
       .mockResolvedValueOnce(boardResponse([
-        { id: 7, title: 'Backend Engineer', location: { name: 'Remote' }, content: 'x', absolute_url: 'u' },
+        { id: 7, title: 'Backend Engineer', location: { name: 'Bengaluru, India' }, content: 'x', absolute_url: 'u' },
       ]));
 
     const jobs = await new GreenhouseFetcher(twoCompanies, 0).fetch(criteria);
@@ -565,6 +570,11 @@ describe('GreenhouseFetcher', () => {
     expect(htmlToText('R&amp;D &amp; more')).toBe('R&D & more');
     expect(htmlToText('Ben&#8217;s &#8220;role&#8221; &#8211; remote')).toBe('Ben\'s "role" - remote');
     expect(htmlToText('')).toBe('');
+    // Regression: the escaped-tag decode was once a no-op, leaving "&lt;p&gt;" in every description.
+    expect(htmlToText('&lt;div&gt;&lt;h2&gt;Requirements&lt;/h2&gt;&lt;p&gt;Java&amp;nbsp;&amp;amp; Kafka&lt;/p&gt;&lt;/div&gt;')).toBe(
+      'Requirements\nJava & Kafka',
+    );
+    expect(htmlToText('&lt;script&gt;alert(1)&lt;/script&gt;Role')).toBe('Role');
   });
 });
 
@@ -643,33 +653,39 @@ describe('JobAggregatorService', () => {
     expect(aggregator.categorizeLocation('Work from home, remote', kw)).toBe('remote');
     expect(aggregator.categorizeLocation('REMOTE', kw)).toBe('remote');
 
-    // Washington — major cities
-    expect(aggregator.categorizeLocation('Seattle, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Bellevue, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Bellevue, Washington', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Tacoma, Washington', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Redmond, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Kirkland, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Renton, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Sammamish, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Auburn, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('Kent, WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('US - WA', kw)).toBe('washington');
-    expect(aggregator.categorizeLocation('SEATTLE', kw)).toBe('washington');
+    // Bangalore / NCR hub
+    expect(aggregator.categorizeLocation('Bengaluru, Karnataka', kw)).toBe('bangalore-ncr');
+    expect(aggregator.categorizeLocation('Bangalore', kw)).toBe('bangalore-ncr');
+    expect(aggregator.categorizeLocation('Gurugram, Haryana', kw)).toBe('bangalore-ncr');
+    expect(aggregator.categorizeLocation('Noida, Uttar Pradesh', kw)).toBe('bangalore-ncr');
+    expect(aggregator.categorizeLocation('New Delhi', kw)).toBe('bangalore-ncr');
+    // A hub city wins over "remote" for hybrid listings.
+    expect(aggregator.categorizeLocation('Bengaluru (Remote/Hybrid)', kw)).toBe('bangalore-ncr');
 
     // Other
-    expect(aggregator.categorizeLocation('San Francisco, CA', kw)).toBe('other');
-    expect(aggregator.categorizeLocation('New York, NY', kw)).toBe('other');
-    expect(aggregator.categorizeLocation('Denver, CO', kw)).toBe('other');
-    expect(aggregator.categorizeLocation('Austin, TX', kw)).toBe('other');
+    expect(aggregator.categorizeLocation('Hyderabad, Telangana', kw)).toBe('other');
+    expect(aggregator.categorizeLocation('Pune, Maharashtra', kw)).toBe('other');
+    expect(aggregator.categorizeLocation('Seattle, WA', kw)).toBe('other');
     expect(aggregator.categorizeLocation(undefined, kw)).toBe('other');
   });
 
   it('falls back to built-in defaults when no locationKeywords provided', () => {
     const aggregator = makeAggregator([]);
     expect(aggregator.categorizeLocation('Remote')).toBe('remote');
-    expect(aggregator.categorizeLocation('Seattle, WA')).toBe('washington');
+    expect(aggregator.categorizeLocation('Bengaluru')).toBe('bangalore-ncr');
     expect(aggregator.categorizeLocation('New York, NY')).toBe('other');
+  });
+
+  it('drops jobs matching EXCLUDE_KEYWORDS before storing them', async () => {
+    const fetcher = {
+      fetch: jest.fn().mockResolvedValue([
+        makeJob({ externalId: 'a', title: 'Senior Backend Engineer', applyUrl: 'https://x/a' }),
+        makeJob({ externalId: 'b', title: 'Senior Blockchain Engineer', applyUrl: 'https://x/b' }),
+        makeJob({ externalId: 'c', title: 'Staff Engineer', description: 'Heavy crypto trading work', applyUrl: 'https://x/c' }),
+      ]),
+    };
+    const jobs = await makeAggregator([fetcher]).fetchAndStoreJobs({ ...criteria, excludeKeywords: ['blockchain', 'crypto'] });
+    expect(jobs.map((j) => j.externalId)).toEqual(['a']);
   });
 
   it('continues fetching from other sources when one fetcher throws', async () => {

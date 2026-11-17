@@ -47,6 +47,8 @@ export class AgentMemoryRepository {
        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        ON CONFLICT (pattern_name)
        DO UPDATE SET
+         pattern_type       = EXCLUDED.pattern_type,
+         pattern_data       = EXCLUDED.pattern_data,
          confidence_score   = EXCLUDED.confidence_score,
          observation_count  = agent_memory.observation_count + EXCLUDED.observation_count,
          last_observed_at   = NOW(),
@@ -66,5 +68,18 @@ export class AgentMemoryRepository {
       await this.upsertPattern(pattern);
     }
     logger.info(`Upserted ${patterns.length} agent memory patterns`);
+  }
+
+  // Forget patterns that haven't been re-observed within the retention window
+  // (AGENT_MEMORY_RETENTION_DAYS), so stale preferences stop steering the prompts.
+  async deleteStale(retentionDays: number): Promise<number> {
+    const pool = getPool();
+    const result = await pool.query(
+      `DELETE FROM agent_memory WHERE last_observed_at < NOW() - make_interval(days => $1)`,
+      [retentionDays],
+    );
+    const removed = result.rowCount ?? 0;
+    if (removed > 0) logger.info(`Removed ${removed} stale agent memory patterns`, { retentionDays });
+    return removed;
   }
 }

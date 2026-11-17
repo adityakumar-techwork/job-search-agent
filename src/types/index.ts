@@ -2,17 +2,20 @@ export interface Config {
   // Database
   databaseUrl: string;
 
-  // Claude API
-  claudeApiKey: string;
-  claudeModel: string;
-  claudeMaxTokens: number;
+  // LLM (Gemini)
+  llmApiKey: string;
+  llmModel: string;
+  llmFallbackModels: string[];
+  llmMaxTokens: number;
+  llmMinIntervalMs: number;
   analysisDescMaxChars: number;
 
-  // Mailgun
+  // Mailgun (only required by the weekly digest — see requireEmailConfig)
   mailgunApiKey: string;
   mailgunDomain: string;
   mailgunBaseUrl: string;
   recipientEmail: string;
+  dashboardUrl: string;
 
   // Job APIs
   rapidApiKey: string;
@@ -28,11 +31,7 @@ export interface Config {
   nodeEnv: string;
   jobTitles: string[];
   locationPriority: string[];
-  locationKeywords: {
-    remote: string[];
-    washington: string[];
-    other: string[];
-  };
+  locationKeywords: LocationKeywords;
   yearsExperience: number;
   preferredCompanyStage: string[];
   excludeKeywords: string[];
@@ -53,9 +52,6 @@ export interface Config {
   agentMemoryRetentionDays: number;
   enablePatternLearning: boolean;
   patternConfidenceThreshold: number;
-
-  // Batch API
-  useBatchApi: boolean;
 }
 
 export interface ResumeMetadata {
@@ -101,7 +97,7 @@ export interface Job {
 }
 
 export type OverallCategory = 'auto-flag' | 'maybe-flag' | 'needs-review' | 'skip';
-export type LocationCategory = 'bangalore-ncr' | 'remote' | 'washington' | 'other';
+export type LocationCategory = 'bangalore-ncr' | 'remote' | 'other';
 export type AnalysisCategory = 'auto-flag' | 'maybe-flag' | 'skip';
 
 export interface JobAnalysisResult {
@@ -111,6 +107,7 @@ export interface JobAnalysisResult {
   relevanceReasoning: string;
   insights: string;
   matchedPatterns: string[];
+  missingKeywords?: string[];
 }
 
 export interface CoverLetterResult {
@@ -180,13 +177,6 @@ export interface TokenBudget {
   buffer: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface Tool {
-  name: string;
-  description: string;
-  input_schema: Record<string, unknown>;
-}
-
 export interface RunningAgentContext {
   resume: {
     redactedText: string;
@@ -200,14 +190,17 @@ export interface RunningAgentContext {
   analyses: JobAnalysis[];
 }
 
+// Keyword lists (lowercase substrings) used to bucket a job's location into a category.
+// `hub` maps to the 'bangalore-ncr' category.
 export interface LocationKeywords {
   remote: string[];
-  washington: string[];
+  hub: string[];
   other: string[];
 }
 
 export interface SearchCriteria {
   jobTitles: string[];
+  excludeKeywords?: string[];
   locationPriority: string[];
   yearsExperience: number;
   preferredStack: string[];

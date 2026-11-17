@@ -1,6 +1,9 @@
+import axios from 'axios';
+import { resetGeminiStateForTests } from '../src/utils/gemini-retry';
 import { TokenBudgetService } from '../src/services/token-budget.service';
 import { ClaudeService } from '../src/services/claude.service';
-import { AutonomousAgent } from '../src/services/agent.service';
+import { AutonomousAgent, patternsFromLearning } from '../src/services/agent.service';
+import { agentContext } from '../src/agent/context';
 import { ResumeRepository } from '../src/db/resume.repository';
 import { AgentMemoryRepository } from '../src/db/agent-memory.repository';
 import { RunningAgentContext, Job } from '../src/types';
@@ -56,7 +59,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 function makeMockClaudeService(callResponse = 'Focus on remote Java roles.'): jest.Mocked<ClaudeService> {
   return {
     call: jest.fn().mockResolvedValue(callResponse),
-    callWithTools: jest.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' }),
+    getTokenUsage: jest.fn().mockReturnValue({ input: 0, output: 0 }),
   } as unknown as jest.Mocked<ClaudeService>;
 }
 
@@ -74,8 +77,14 @@ function makeMockMemoryRepo(patterns = []): jest.Mocked<AgentMemoryRepository> {
 
 const fakeConfig = {
   jobTitles: ['Senior Software Engineer'],
-  locationPriority: ['remote', 'washington'],
-  claudeApiKey: 'sk-ant-test-key',
+  locationPriority: ['remote', 'bangalore-ncr'],
+  llmApiKey: 'test-gemini-key',
+  patternConfidenceThreshold: 0,
+  enablePatternLearning: true,
+  agentMemoryRetentionDays: 90,
+  excludeKeywords: [],
+  preferredTechnicalStack: [],
+  yearsExperience: 7,
 } as never;
 
 // ── TokenBudgetService ────────────────────────────────────────────────────────
@@ -115,9 +124,9 @@ describe('TokenBudgetService', () => {
 
   it('locationCaps() distributes 30 jobs across 3 priorities as 15/10/5', () => {
     const budget = new TokenBudgetService();
-    const caps = budget.locationCaps(['remote', 'washington', 'other']);
+    const caps = budget.locationCaps(['remote', 'bangalore-ncr', 'other']);
     expect(caps.get('remote')).toBe(15);
-    expect(caps.get('washington')).toBe(10);
+    expect(caps.get('bangalore-ncr')).toBe(10);
     expect(caps.get('other')).toBe(5);
     const total = [...caps.values()].reduce((a, b) => a + b, 0);
     expect(total).toBe(30);
@@ -125,9 +134,9 @@ describe('TokenBudgetService', () => {
 
   it('locationCaps() distributes 30 jobs across 2 priorities as 20/10', () => {
     const budget = new TokenBudgetService();
-    const caps = budget.locationCaps(['remote', 'washington']);
+    const caps = budget.locationCaps(['remote', 'bangalore-ncr']);
     expect(caps.get('remote')).toBe(20);
-    expect(caps.get('washington')).toBe(10);
+    expect(caps.get('bangalore-ncr')).toBe(10);
     expect([...caps.values()].reduce((a, b) => a + b, 0)).toBe(30);
   });
 
@@ -146,27 +155,54 @@ describe('TokenBudgetService', () => {
 // ── ClaudeService ─────────────────────────────────────────────────────────────
 
 describe('ClaudeService', () => {
+  beforeEach(() => resetGeminiStateForTests());
+  afterEach(() => jest.restoreAllMocks());
+
+  function gemini(text: string) {
+    return { data: { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 42, candidatesTokenCount: 13 } } };
+  }
+
   it('instantiates without throwing given an API key, model, and maxTokens', () => {
-    expect(() => new ClaudeService('sk-ant-test-key-for-unit-tests', 'claude-opus-4-7', 4096)).not.toThrow();
+    expect(() => new ClaudeService('test-gemini-key', 'gemini-test', 4096)).not.toThrow();
   });
 
-  it('calls the API with the configured model and returns text', async () => {
-    const service = new ClaudeService('sk-ant-test-key', 'claude-opus-4-7', 4096);
-    // Spy on the internal client.messages.create to verify model selection
-    const mockCreate = jest.fn().mockResolvedValue({
-      content: [{ type: 'text', text: 'Strategy: focus on remote Java roles.' }],
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 42, output_tokens: 13 },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any).client = { messages: { create: mockCreate } };
+  it('calls Gemini with the configured model (key in header) and returns text', async () => {
+    const post = jest.spyOn(axios, 'post').mockResolvedValue(gemini('Strategy: focus on Bangalore backend roles.'));
+    const service = new ClaudeService('test-gemini-key', 'gemini-test', 4096);
 
     const result = await service.call('What is your strategy?');
 
-    expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-opus-4-7' }),
-    );
     expect(result).toContain('Strategy');
+    const [url, , cfg] = post.mock.calls[0] as [string, unknown, { headers: Record<string, string> }];
+    expect(url).toMatch(/\/models\/gemini-test:generateContent$/);
+    expect(cfg.headers['x-goog-api-key']).toBe('test-gemini-key');
+    expect(service.getTokenUsage()).toEqual({ input: 42, output: 13 });
+  });
+
+  it('falls back to the next model when the configured one is retired (404)', async () => {
+    const post = jest
+      .spyOn(axios, 'post')
+      .mockRejectedValueOnce(Object.assign(new Error('Not Found'), { response: { status: 404 } }))
+      .mockResolvedValueOnce(gemini('ok'));
+    const service = new ClaudeService('test-gemini-key', 'gemini-retired', 4096, { fallbackModels: ['gemini-backup'] });
+
+    expect(await service.call('hi')).toBe('ok');
+    expect(post.mock.calls[1][0]).toContain('/models/gemini-backup:');
+  });
+
+  it('does not retry configuration errors such as 400 / 403', async () => {
+    const post = jest
+      .spyOn(axios, 'post')
+      .mockRejectedValue(Object.assign(new Error('Forbidden'), { response: { status: 403 } }));
+    const service = new ClaudeService('test-gemini-key', 'gemini-test', 4096, { fallbackModels: ['gemini-backup'] });
+    await expect(service.call('hi')).rejects.toThrow('Forbidden');
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an empty (safety-blocked) response as an error', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({ data: { candidates: [{ finishReason: 'SAFETY' }] } });
+    const service = new ClaudeService('test-gemini-key', 'gemini-test', 4096);
+    await expect(service.call('hi')).rejects.toThrow('finishReason=SAFETY');
   });
 });
 
@@ -289,34 +325,34 @@ describe('AutonomousAgent', () => {
   });
 
   it('selectJobsForAnalysis() respects per-location caps and total cap', () => {
-    // fakeConfig has locationPriority: ['remote', 'washington']
-    // 2 priorities → caps: remote=20, washington=10
+    // fakeConfig has locationPriority: ['remote', 'bangalore-ncr']
+    // 2 priorities → caps: remote=20, bangalore-ncr=10
     const agent = makeAgent();
     const jobs = [
       ...Array.from({ length: 25 }, (_, i) =>
         makeJob({ id: `r${i}`, externalId: `r${i}`, locationCategory: 'remote' }),
       ),
       ...Array.from({ length: 15 }, (_, i) =>
-        makeJob({ id: `w${i}`, externalId: `w${i}`, locationCategory: 'washington' }),
+        makeJob({ id: `w${i}`, externalId: `w${i}`, locationCategory: 'bangalore-ncr' }),
       ),
     ];
 
     const selected = agent.selectJobsForAnalysis(jobs);
 
     const remoteCount = selected.filter((j) => j.locationCategory === 'remote').length;
-    const washingtonCount = selected.filter((j) => j.locationCategory === 'washington').length;
+    const hubCount = selected.filter((j) => j.locationCategory === 'bangalore-ncr').length;
 
     // Supply exceeds caps in both locations, so we should hit the caps exactly
     expect(selected.length).toBe(30);
     expect(remoteCount).toBe(20);
-    expect(washingtonCount).toBe(10);
+    expect(hubCount).toBe(10);
   });
 
   it('selectJobsForAnalysis() takes all available jobs when supply is below cap', () => {
     const agent = makeAgent();
     const jobs = [
       makeJob({ id: 'r1', externalId: 'r1', locationCategory: 'remote' }),
-      makeJob({ id: 'w1', externalId: 'w1', locationCategory: 'washington' }),
+      makeJob({ id: 'w1', externalId: 'w1', locationCategory: 'bangalore-ncr' }),
     ];
 
     const selected = agent.selectJobsForAnalysis(jobs);
@@ -330,8 +366,60 @@ describe('AutonomousAgent', () => {
       makeJob({ id: 'o1', externalId: 'o1', locationCategory: 'other' }),
     ];
 
-    // fakeConfig locationPriority = ['remote', 'washington'] — 'other' gets cap 0
+    // fakeConfig locationPriority = ['remote', 'bangalore-ncr'] — 'other' gets cap 0
     const selected = agent.selectJobsForAnalysis(jobs);
     expect(selected.every((j) => j.locationCategory !== 'other')).toBe(true);
+  });
+});
+// ── Learning → memory, and run-level failure detection ──────────────────────
+
+describe('patternsFromLearning', () => {
+  it('creates one focus_* pattern per focus area with evidence-based confidence', () => {
+    const analyses = [
+      { job_id: 'a', company: 'X', relevance_score: 90, interview_chance: 50, location_category: 'remote', overall_category: 'auto-flag', relevance_reasoning: '', insights: '', matched_patterns: ['Java'] },
+      { job_id: 'b', company: 'Y', relevance_score: 40, interview_chance: 20, location_category: 'remote', overall_category: 'skip', relevance_reasoning: '', insights: '', matched_patterns: [] },
+    ];
+    const patterns = patternsFromLearning(
+      { topSkillsMatched: ['Java'], commonGaps: ['Kubernetes'], recommendedFocus: ['Java', 'Spring Boot'], bestJobCategories: [] },
+      analyses,
+    );
+    expect(patterns.map((p) => p.patternName)).toEqual(['focus_java', 'focus_spring_boot']);
+    expect(patterns[0].confidenceScore).toBe(0.9); // matched the only non-skip job → 0.3 + 1.0 * 0.6
+    expect(patterns[1].confidenceScore).toBe(0.3); // no evidence today → floor
+    expect(patterns[0].patternData).toEqual({ topSkills: ['Java'], gaps: ['Kubernetes'], categories: [] });
+  });
+});
+
+describe('AutonomousAgent run failure detection', () => {
+  it('fails the run when every job analysis fails (e.g. bad API key) instead of reporting success', async () => {
+    const jobs = [
+      makeJob({ id: 'j1', locationCategory: 'remote' }),
+      makeJob({ id: 'j2', externalId: 'j2', applyUrl: 'https://acme.com/jobs/2', locationCategory: 'remote' }),
+    ];
+    const aggregator = { fetchAndStoreJobs: jest.fn().mockResolvedValue(jobs) };
+    const jobRepo = { getUnanalyzedJobs: jest.fn().mockResolvedValue(jobs) };
+    const analysis = {
+      analyzeJob: jest.fn().mockRejectedValue(new Error('403 Forbidden')),
+      learnPatterns: jest.fn(),
+      getTokenUsage: jest.fn().mockReturnValue({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }),
+    };
+    const runs = { startRun: jest.fn().mockResolvedValue('run-1'), failRun: jest.fn(), completeRun: jest.fn() };
+    agentContext.resume = makeContext().resume;
+    const agent = new AutonomousAgent(
+      { ...(fakeConfig as object), locationPriority: ['remote'] } as never,
+      makeMockResumeRepo(),
+      makeMockMemoryRepo(),
+      makeMockClaudeService(),
+      new TokenBudgetService(),
+      aggregator as never,
+      analysis as never,
+      undefined,
+      jobRepo as never,
+      runs as never,
+    );
+
+    await expect(agent.runDailyLoop()).rejects.toThrow('All 2 job analyses failed');
+    expect(runs.failRun).toHaveBeenCalledWith('run-1', expect.stringContaining('All 2 job analyses failed'));
+    expect(runs.completeRun).not.toHaveBeenCalled();
   });
 });

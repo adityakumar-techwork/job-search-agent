@@ -6,7 +6,7 @@ import { AgentMemoryRepository } from '../src/db/agent-memory.repository';
 import { ApplicationRepository } from '../src/db/application.repository';
 
 let server: http.Server;
-beforeAll(() => { server = createApp(['remote', 'washington', 'other']).listen(0); });
+beforeAll(() => { server = createApp(['bangalore-ncr', 'remote', 'other']).listen(0, '127.0.0.1'); });
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 afterEach(() => jest.restoreAllMocks());
 

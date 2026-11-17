@@ -10,8 +10,12 @@ interface LogEntry {
 // Patterns that must never appear in log output
 const SENSITIVE_PATTERNS = [
   /sk-ant-[A-Za-z0-9_-]+/g,       // Claude API keys
+  /AIza[0-9A-Za-z_-]{20,}/g,       // Google / Gemini API keys
+  /([?&](?:key|api_key|apikey|token)=)[^&\s"']+/gi, // keys in query strings
+  /\bkey-[0-9a-f]{32}\b/g,         // Mailgun legacy keys
+  /\b[0-9a-f]{32}-[0-9a-f]{8}-[0-9a-f]{8}\b/g, // Mailgun API keys
   /SG\.[A-Za-z0-9_.-]+/g,          // SendGrid keys
-  /postgresql:\/\/[^@]+@/g,         // DB credentials in URL
+  /postgres(?:ql)?:\/\/[^@\s]+@/g, // DB credentials in URL
   /password["']?\s*[:=]\s*["']?\S+/gi,
   /api[_-]?key["']?\s*[:=]\s*["']?\S+/gi,
 ];

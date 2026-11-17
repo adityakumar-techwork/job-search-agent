@@ -25,33 +25,58 @@ export function titleMatches(title: string, jobTitles: string[]): boolean {
   });
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', ndash: '-', mdash: '-', hellip: '...', bull: '•',
+};
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, ent: string) => {
+    if (ent[0] === '#') {
+      const code = ent[1] === 'x' || ent[1] === 'X' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+      if (!Number.isFinite(code)) return m;
+      if (code === 160) return ' ';
+      if (code === 8216 || code === 8217) return "'";
+      if (code === 8220 || code === 8221) return '"';
+      if (code === 8211 || code === 8212) return '-';
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return m;
+      }
+    }
+    return NAMED_ENTITIES[ent.toLowerCase()] ?? m;
+  });
+}
+
+// Greenhouse's `content` field is HTML that is itself entity-escaped (&lt;p&gt;...), so decode
+// once to get real tags, strip the tags, then decode the text-level entities that remain.
 export function htmlToText(html: string): string {
   if (!html) return '';
-  return html
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/&/g, '&')
+  const unescaped = html.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
+  const stripped = unescaped
+    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, ' ')
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\s*li[^>]*>/gi, '\n• ')
     .replace(/<\/\s*(p|div|li|ul|ol|h[1-6]|tr|section|header)\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/ | /gi, ' ')
-    .replace(/'|’|‘|’|‘/g, "'")
-    .replace(/"|“|”|“|”/g, '"')
-    .replace(/–|—|–|—/g, '-')
-    .replace(/&/g, '&')
+    .replace(/<[^>]+>/g, ' ');
+  return decodeEntities(stripped)
+    .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-const INDIA_SIGNAL = /\b(india|bangalore|bengaluru|delhi|ncr|noida|gurgaon|gurugram|hyderabad|pune|mumbai|chennai|remote[\s-]*india)\b/i;
+// Boards list every geo; keep roles located in India (or remote roles open to India / APAC).
+const INDIA_SIGNAL = /\b(india|bangalore|bengaluru|delhi|ncr|noida|gurgaon|gurugram|hyderabad|pune|mumbai|chennai|remote[\s-]*(?:india|apac|asia))\b/i;
 
 export function isIndiaOrRemoteLocation(location?: string): boolean {
   if (!location) return false;
   return INDIA_SIGNAL.test(location);
 }
+
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -61,10 +86,17 @@ export class GreenhouseFetcher implements JobFetcher {
   constructor(
     private readonly companies: Company[],
     private readonly delayMs = 250,
-    private readonly _skipOnDays: string[] = [],
+    // Weekdays (sun..sat) on which Greenhouse stands down so another lane gets the analysis budget.
+    private readonly skipOnDays: string[] = [],
   ) {}
 
   async fetch(criteria: SearchCriteria): Promise<Job[]> {
+    const today = DAY_NAMES[new Date().getDay()];
+    if (this.skipOnDays.some((d) => d.trim().toLowerCase().slice(0, 3) === today)) {
+      logger.info(`Greenhouse: ${today} is a reserved day — skipping`);
+      return [];
+    }
+
     const boards = this.companies.filter((c) => c.provider === 'greenhouse' && c.slug.trim());
     if (boards.length === 0) return [];
 

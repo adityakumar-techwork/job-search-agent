@@ -11,6 +11,7 @@ export class DigestService {
     private readonly mailgunDomain: string,
     private readonly mailgunBaseUrl: string,
     private readonly recipientEmail: string,
+    private readonly dashboardUrl = 'http://localhost:3000',
   ) {
     this.digestRepo = new DigestRepository();
   }
@@ -120,7 +121,7 @@ export class DigestService {
   </div>
 
   <div class="footer">
-    Sent by your Job Search Agent &middot; <a href="http://localhost:5173" style="color:#6b7280">Open Dashboard</a>
+    Sent by your Job Search Agent &middot; <a href="${this.escape(this.dashboardUrl)}" style="color:#6b7280">Open Dashboard</a>
   </div>
 </div>
 </body>
@@ -137,7 +138,7 @@ export class DigestService {
     <span class="score-pill score-interview">Interview: ${Math.round(job.interviewChance)}%</span>
   </div>
   ${job.relevanceReasoning ? `<p class="reasoning">${this.escape(job.relevanceReasoning)}</p>` : ''}
-  <a href="${this.escape(job.applyUrl)}" class="apply-btn">Apply Now</a>
+  ${/^https?:\/\//i.test(job.applyUrl) ? `<a href="${this.escape(job.applyUrl)}" class="apply-btn">Apply Now</a>` : ''}
 </div>`;
   }
 
@@ -146,11 +147,13 @@ export class DigestService {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private async sendEmail(html: string): Promise<void> {
     const mailgun = new Mailgun(FormData);
+    // The weekly digest is the agent's only output channel — fail loudly if Mailgun rejects it.
     const client = mailgun.client({ username: 'api', key: this.mailgunApiKey, url: this.mailgunBaseUrl });
 
     await client.messages.create(this.mailgunDomain, {

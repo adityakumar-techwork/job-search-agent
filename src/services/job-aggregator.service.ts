@@ -1,6 +1,7 @@
 import { Job, JobFetcher, LocationKeywords, SearchCriteria } from '../types';
 import { JobRepository } from '../db/job.repository';
 import { logger } from '../utils/logger';
+import { categorizeLocation } from '../utils/location';
 
 // If one API fails, continue with others.
 // Wrapping each fetch in .catch() ensures:
@@ -63,7 +64,7 @@ export class JobAggregatorService {
       ),
     );
 
-    const allJobs = results.flat();
+    const allJobs = this.applyExcludeKeywords(results.flat(), criteria.excludeKeywords);
     logger.info(`Fetched ${allJobs.length} jobs from ${this.fetchers.length} sources`);
 
     // Location bucket and canonical apply URL both feed dedup, so compute them before deduping.
@@ -105,16 +106,20 @@ export class JobAggregatorService {
   }
 
   categorizeLocation(location?: string, locationKeywords?: LocationKeywords): string {
-    if (!location) return 'other';
-    const loc = location.toLowerCase();
-    const kw: LocationKeywords = locationKeywords ?? {
-      remote: ['remote'],
-      washington: ['bangalore-ncr', 'seattle', '- wa'],
-      other: [],
-    };
-    if (kw.remote.some((k) => loc.includes(k))) return 'remote';
-    if ([...kw.washington, ...['bangalore','bengaluru','karnataka','delhi','ncr','noida','gurgaon','gurugram','haryana','uttar pradesh']].some((k) => loc.includes(k))) return 'bangalore-ncr';
-    if (kw.other.length > 0 && kw.other.some((k) => loc.includes(k))) return 'other';
-    return 'other';
+    return categorizeLocation(location, locationKeywords);
+  }
+
+  // Drops jobs whose title or description contains any EXCLUDE_KEYWORDS entry (case-insensitive),
+  // before they cost an LLM call.
+  private applyExcludeKeywords(jobs: Job[], exclude: string[] = []): Job[] {
+    if (exclude.length === 0) return jobs;
+    const kept = jobs.filter((j) => {
+      const hay = `${j.title}\n${j.description ?? ''}`.toLowerCase();
+      return !exclude.some((k) => hay.includes(k));
+    });
+    if (kept.length !== jobs.length) {
+      logger.info(`EXCLUDE_KEYWORDS removed ${jobs.length - kept.length} jobs`);
+    }
+    return kept;
   }
 }

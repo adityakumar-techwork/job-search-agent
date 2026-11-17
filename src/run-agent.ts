@@ -19,8 +19,8 @@ import { AgentMemoryRepository } from './db/agent-memory.repository';
 import { JobRepository } from './db/job.repository';
 import { ClaudeAnalysisRepository } from './db/claude-analysis.repository';
 import { AgentRunRepository } from './db/agent-run.repository';
-import { BatchRunRepository } from './db/batch-run.repository';
 import { agentContext } from './agent/context';
+import { JobFetcher } from './types';
 
 async function main(): Promise<void> {
   logger.info('Agent run starting');
@@ -30,11 +30,17 @@ async function main(): Promise<void> {
   await testConnection();
   logger.info('Database connected');
 
-  const resumeService = new ResumeService();
+  const resumeService = new ResumeService({
+    enabled: config.enablePiiRedaction,
+    additionalPatterns: config.additionalRedactionPatterns,
+  });
   const resumeRepository = new ResumeRepository();
   const changeService = new ResumeChangeDetectionService(resumeRepository);
 
-  const { redactedText, hash, metadata } = await resumeService.loadAndRedact(config.resumePath);
+  const { redactedText, hash, metadata } = await resumeService.loadAndRedact({
+    path: config.resumePath || undefined,
+    base64: config.resumeBase64,
+  });
 
   const { changed, action } = await changeService.detectChange(hash, metadata);
   if (changed) {
@@ -65,22 +71,31 @@ async function main(): Promise<void> {
   const agentMemoryRepository = new AgentMemoryRepository();
   const jobRepository = new JobRepository();
   const tokenBudget = new TokenBudgetService();
-  const claudeService = new ClaudeService(config.claudeApiKey, config.claudeModel, config.claudeMaxTokens);
+  const llmOpts = { fallbackModels: config.llmFallbackModels, minIntervalMs: config.llmMinIntervalMs };
+  const claudeService = new ClaudeService(config.llmApiKey, config.llmModel, config.llmMaxTokens, llmOpts);
   const jsearchConfig = loadJSearchConfig();
-  const jobAggregator = new JobAggregatorService(
-    [
-      new JSearchFetcher(config.rapidApiKey, jsearchConfig),
-      // Greenhouse runs on the days JSearch does not, so each lane gets the full analysis budget.
-      new GreenhouseFetcher(loadCompanies(), 250, []),
-      new LeverFetcher(loadCompanies()),
-      new AshbyFetcher(loadCompanies()),
-    ],
-    jobRepository,
-  );
-  const claudeAnalysisService = new ClaudeAnalysisService(config.claudeApiKey, config.claudeModel, config.analysisDescMaxChars);
+  const companies = loadCompanies();
+  const fetchers: JobFetcher[] = [
+    new GreenhouseFetcher(companies, 250, []),
+    new LeverFetcher(companies),
+    new AshbyFetcher(companies),
+  ];
+  if (config.rapidApiKey) {
+    fetchers.unshift(new JSearchFetcher(config.rapidApiKey, jsearchConfig));
+  } else {
+    logger.warn('RAPIDAPI_KEY not set — skipping JSearch, using company ATS boards only');
+  }
+  const jobAggregator = new JobAggregatorService(fetchers, jobRepository);
+  const claudeAnalysisService = new ClaudeAnalysisService(config.llmApiKey, config.llmModel, config.analysisDescMaxChars, {
+    ...llmOpts,
+    profile: {
+      jobTitles: config.jobTitles,
+      locationPriority: config.locationPriority,
+      preferredCompanyStage: config.preferredCompanyStage,
+    },
+  });
   const claudeAnalysisRepository = new ClaudeAnalysisRepository();
   const agentRunRepository = new AgentRunRepository();
-  const batchRunRepository = new BatchRunRepository();
 
   const agent = new AutonomousAgent(
     config,
@@ -93,7 +108,6 @@ async function main(): Promise<void> {
     claudeAnalysisRepository,
     jobRepository,
     agentRunRepository,
-    batchRunRepository,
   );
 
   await agent.runDailyLoop();
@@ -103,6 +117,7 @@ async function main(): Promise<void> {
 main()
   .catch((err) => {
     logger.error('Agent run failed', { error: err instanceof Error ? err.message : String(err) });
-    process.exit(1);
+    // exitCode (not process.exit) so the finally() below still closes the pool and flushes logs.
+    process.exitCode = 1;
   })
   .finally(() => closePool());

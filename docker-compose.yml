@@ -5,7 +5,8 @@ services:
     environment:
       POSTGRES_DB: job_search_agent
       POSTGRES_USER: jobagent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobagent123}
+      # Set POSTGRES_PASSWORD in .env (same folder) — compose refuses to start without it.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:

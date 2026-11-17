@@ -1,7 +1,8 @@
 import axios from 'axios';
-import { Job, JobFetcher, LocationKeywords, SearchCriteria } from '../../types';
+import { Job, JobFetcher, SearchCriteria } from '../../types';
 import { JSearchConfig } from '../../config/jsearch.config';
 import { logger } from '../../utils/logger';
+import { categorizeLocation } from '../../utils/location';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
@@ -80,7 +81,7 @@ export class JSearchFetcher implements JobFetcher {
           job_title: title,
           num_pages: '1',
           date_posted: this.config.datePosted,
-          country: 'us',
+          country: this.config.country,
         },
         headers: {
           'X-RapidAPI-Key': this.apiKey,
@@ -116,10 +117,13 @@ export class JSearchFetcher implements JobFetcher {
         : [];
 
     return rawData.map((raw) => {
-      const location = `${raw.job_country ?? ''} - ${raw.job_state ?? ''}`
-        .trim()
-        .replace(/^-\s*|-\s*$/, '')
-        .trim();
+      // JSearch gives city/state/country separately (e.g. "Bengaluru", "KA", "IN"). Include the city —
+      // without it Indian hubs can't be recognised and every job falls into 'other'.
+      const location =
+        [raw.job_city, raw.job_state, raw.job_country]
+          .map((v) => (v == null ? '' : String(v).trim()))
+          .filter(Boolean)
+          .join(', ') || (typeof raw.job_location === 'string' ? raw.job_location : '');
       return {
         source: 'jsearch',
         externalId: String(raw.job_id ?? ''),
@@ -127,7 +131,10 @@ export class JSearchFetcher implements JobFetcher {
         company: String(raw.employer_name ?? ''),
         description: String(raw.job_description ?? ''),
         location,
-        locationCategory: this.categorizeLocation(location, String(raw.job_title ?? ''), raw.job_is_remote === true, criteria.locationKeywords),
+        locationCategory: categorizeLocation(location, criteria.locationKeywords, {
+          isRemote: raw.job_is_remote === true,
+          extraRemoteText: String(raw.job_title ?? ''),
+        }),
         salaryMin: raw.job_min_salary != null ? Number(raw.job_min_salary) : undefined,
         salaryMax: raw.job_max_salary != null ? Number(raw.job_max_salary) : undefined,
         salaryCurrency: raw.salary_currency != null ? String(raw.salary_currency) : undefined,
@@ -143,21 +150,5 @@ export class JSearchFetcher implements JobFetcher {
         companyWebsite: raw.company_website ? String(raw.company_website) : undefined,
       };
     });
-  }
-
-  private categorizeLocation(location: string | undefined, title: string, isRemoteFlag: boolean, locationKeywords?: LocationKeywords): string {
-    const loc = (location ?? '').toLowerCase();
-    const kw: LocationKeywords = locationKeywords ?? {
-      remote: ['remote'],
-      washington: ['bangalore-ncr', 'seattle', '- wa'],
-      other: [],
-    };
-    // Remote is a work arrangement, not a place — check location, title, and the API's is_remote flag
-    const remoteTarget = `${loc} ${title.toLowerCase()}`;
-    if (isRemoteFlag || kw.remote.some((k) => remoteTarget.includes(k))) return 'remote';
-    // Washington/other are geographic — only check location string
-    if ([...kw.washington, ...['bangalore','bengaluru','karnataka','delhi','ncr','noida','gurgaon','gurugram','haryana','uttar pradesh']].some((k) => loc.includes(k))) return 'bangalore-ncr';
-    if (kw.other.length > 0 && kw.other.some((k) => loc.includes(k))) return 'other';
-    return 'other';
   }
 }

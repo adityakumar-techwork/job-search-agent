@@ -1,6 +1,9 @@
 import type { JobWithAnalysis, JobDetail, RawJob, Patterns, Application, ApplicationStatus, AgentRun } from '../types';
 
-const BASE_URL = 'http://localhost:3001/api';
+// Override with VITE_API_URL (e.g. in dashboard/.env.local) if the API runs elsewhere.
+export const BASE_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api';
+
+const enc = encodeURIComponent;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
   try {
@@ -76,16 +79,12 @@ export async function getMaybeFlaggedJobs(): Promise<JobWithAnalysis[]> {
   return (data?.jobs ?? []).map(flatToNested);
 }
 
+// Throws on failure (unlike request()) so pages can tell "API unreachable" apart from "no jobs yet".
 export async function getAllAnalyses(limit = 50, offset = 0): Promise<{ analyses: JobWithAnalysis[]; total: number }> {
-  try {
-    const res = await fetch(`${BASE_URL}/analyses?limit=${limit}&offset=${offset}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    return { analyses: json.data?.analyses ?? [], total: json.count ?? 0 };
-  } catch (err) {
-    console.error('API error [/analyses]:', err);
-    return { analyses: [], total: 0 };
-  }
+  const res = await fetch(`${BASE_URL}/analyses?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return { analyses: json.data?.analyses ?? [], total: json.count ?? 0 };
 }
 
 // Fetches every page from /analyses (backend caps each page at 100) so the
@@ -103,7 +102,7 @@ export async function getAllAnalysesFull(): Promise<JobWithAnalysis[]> {
 }
 
 export async function getJobDetail(jobId: string): Promise<JobDetail | null> {
-  return request<JobDetail>(`/jobs/${jobId}`);
+  return request<JobDetail>(`/jobs/${enc(jobId)}`);
 }
 
 export async function getAllJobs(limit = 200): Promise<RawJob[] | null> {
@@ -123,7 +122,7 @@ export async function setJobInteraction(
   type: 'saved' | 'not_interested',
   active: boolean,
 ): Promise<boolean> {
-  const result = await request<{ success: boolean }>(`/interactions/${jobId}`, {
+  const result = await request<{ success: boolean }>(`/interactions/${enc(jobId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, active }),
@@ -132,7 +131,7 @@ export async function setJobInteraction(
 }
 
 export async function getJobsByLocation(category: string): Promise<JobWithAnalysis[]> {
-  const data = await request<{ jobs: FlatJobWithAnalysis[] }>(`/jobs/by-location?category=${category}`);
+  const data = await request<{ jobs: FlatJobWithAnalysis[] }>(`/jobs/by-location?category=${enc(category)}`);
   return (data?.jobs ?? []).map(flatToNested);
 }
 
@@ -156,7 +155,7 @@ export async function recordApplication(jobId: string, coverLetterUsed?: string)
 
 // Generates the cover letter on first call and returns the stored draft on subsequent ones.
 export async function generateCoverLetter(jobId: string): Promise<string | null> {
-  const data = await request<{ coverLetterDraft: string }>(`/analyses/${jobId}/cover-letter`, {
+  const data = await request<{ coverLetterDraft: string }>(`/analyses/${enc(jobId)}/cover-letter`, {
     method: 'POST',
   });
   return data?.coverLetterDraft ?? null;
@@ -164,7 +163,7 @@ export async function generateCoverLetter(jobId: string): Promise<string | null>
 
 // Backend route is PATCH /applications/:jobId (not application id — job id)
 export async function updateApplicationStatus(jobId: string, status: ApplicationStatus): Promise<Application | null> {
-  return request<Application>(`/applications/${jobId}`, {
+  return request<Application>(`/applications/${enc(jobId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),

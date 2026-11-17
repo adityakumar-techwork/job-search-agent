@@ -4,7 +4,7 @@ import { JobList } from '../components/JobList';
 import { LocationFilter } from '../components/LocationFilter';
 import { PatternInsights } from '../components/PatternInsights';
 import { Pagination } from '../components/Pagination';
-import { getAllAnalysesFull, getPatterns, getAgentRuns } from '../services/api';
+import { BASE_URL, getAllAnalysesFull, getPatterns, getAgentRuns } from '../services/api';
 
 const STALE_THRESHOLD_HOURS = 24;
 const SECTION_PAGE_SIZE = 6;
@@ -35,6 +35,7 @@ export function Dashboard() {
   const [analyses, setAnalyses] = useState<JobWithAnalysis[]>([]);
   const [patterns, setPatterns] = useState<Patterns | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [patternsLoading, setPatternsLoading] = useState(true);
   const [location, setLocation] = useState('all');
   const [staleHours, setStaleHours] = useState<number | null>(null);
@@ -46,10 +47,13 @@ export function Dashboard() {
   const [needsReviewPage, setNeedsReviewPage] = useState(1);
 
   useEffect(() => {
-    getAllAnalysesFull().then((data) => {
-      setAnalyses(data);
-      setIsLoading(false);
-    });
+    getAllAnalysesFull()
+      .then((data) => setAnalyses(data))
+      .catch((err) => {
+        console.error('API error [/analyses]:', err);
+        setLoadError(`Can't reach the API at ${BASE_URL} — is \`npm start\` running?`);
+      })
+      .finally(() => setIsLoading(false));
     getPatterns().then((p) => {
       setPatterns(p);
       setPatternsLoading(false);
@@ -95,6 +99,11 @@ export function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      {loadError && (
+        <div role="alert" className="bg-surface-2 border border-subtle rounded-card px-4 py-3 text-sm text-body">
+          {loadError}
+        </div>
+      )}
       {staleHours !== null && (
         <div role="status" className="flex items-center gap-3 bg-surface-2 border border-subtle rounded-card px-4 py-3 text-sm text-body">
           <svg aria-hidden="true" className="w-4 h-4 shrink-0 text-label" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

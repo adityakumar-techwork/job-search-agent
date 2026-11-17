@@ -11,21 +11,36 @@ import { ClaudeAnalysisService } from './services/claude-analysis.service';
 // needs from the DB itself). Fetching, analysis, and the daily agent loop live in run-agent.ts;
 // don't duplicate that setup here.
 
+function isLoopback(host: string): boolean {
+  return host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
 async function main(): Promise<void> {
   try {
-    const config = validateAndLoadConfig();
+    const port = parseInt(process.env['PORT'] ?? '3001', 10);
+    // The API has no authentication, so it only ever listens on loopback. To reach it from another
+    // machine, use an SSH tunnel (ssh -L 3001:127.0.0.1:3001 host) or put a reverse proxy that does
+    // real authentication in front of it — never bind it to a LAN/public interface directly.
+    const host = process.env['HOST'] ?? '127.0.0.1';
+    if (!isLoopback(host)) {
+      throw new Error(
+        `HOST=${host} would expose the unauthenticated API beyond this machine. Use 127.0.0.1 / ::1 / localhost.`,
+      );
+    }
+
+    const config = validateAndLoadConfig({ requireResume: false });
     logger.info('Config validated', { nodeEnv: config.nodeEnv });
 
     getPool();
     await testConnection();
     logger.info('Database connected');
 
-    const claudeAnalysisService = new ClaudeAnalysisService(config.claudeApiKey, config.claudeModel, config.analysisDescMaxChars);
+    const claudeAnalysisService = new ClaudeAnalysisService(config.llmApiKey, config.llmModel, config.analysisDescMaxChars, {
+      fallbackModels: config.llmFallbackModels,
+      minIntervalMs: config.llmMinIntervalMs,
+    });
     const coverLetterService = new CoverLetterService(claudeAnalysisService);
     const app = createApp(config.locationPriority, coverLetterService);
-    const port = parseInt(process.env['PORT'] ?? '3001', 10);
-    // The API has no auth — bind to loopback so it isn't reachable from the local network.
-    const host = process.env['HOST'] ?? '127.0.0.1';
     const server: Server = app.listen(port, host, () => {
       logger.info(`REST API listening on ${host}:${port}`);
     });

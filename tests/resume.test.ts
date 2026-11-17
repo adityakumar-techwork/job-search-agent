@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { ResumeService } from '../src/services/resume.service';
+import { ResumeService, redactText, detectName } from '../src/services/resume.service';
 import { ResumeChangeDetectionService } from '../src/services/resume-change.service';
 import { ResumeRepository } from '../src/db/resume.repository';
 import { ResumeMetadata } from '../src/types';
@@ -230,5 +230,70 @@ describe('ResumeRepository', () => {
       }
       throw err;
     }
+  });
+});
+// ── India-format redaction & base64 loading ──────────────────────────────────
+
+describe('redactText (India formats)', () => {
+  const sample = [
+    'Aditya Example Kumar',
+    'Mobile: +91 98765 43210 | Alt: 09876543210 | 98765-43210',
+    'aditya.k+jobs@gmail.co.in · linkedin.com/in/aditya-k-123 · https://github.com/adityak',
+    'HSR Layout, Bengaluru, Karnataka 560102',
+    'PAN: ABCDE1234F  Aadhaar: 2345 6789 0123',
+    'Date of Birth: 14-08-1995',
+    'SUMMARY',
+    'Senior engineer (Aditya) who scaled payments to 100000 requests/s across 12 services at Razorpay.',
+  ].join('\n');
+  const { redacted } = redactText(sample);
+
+  it.each([
+    ['name', 'Aditya'],
+    ['surname', 'Kumar'],
+    ['+91 5-5 mobile', '98765 43210'],
+    ['0-prefixed mobile', '09876543210'],
+    ['dashed mobile', '98765-43210'],
+    ['email with plus/sub-domain', 'aditya.k+jobs@gmail.co.in'],
+    ['LinkedIn URL', 'linkedin.com/in/aditya-k-123'],
+    ['GitHub URL', 'github.com/adityak'],
+    ['PIN code', '560102'],
+    ['PAN', 'ABCDE1234F'],
+    ['Aadhaar', '2345 6789 0123'],
+    ['DOB', '14-08-1995'],
+  ])('removes %s', (_label, value) => {
+    expect(redacted).not.toContain(value);
+  });
+
+  it('keeps ordinary numbers and employer names that matter for scoring', () => {
+    expect(redacted).toContain('100000 requests/s');
+    expect(redacted).toContain('12 services');
+    expect(redacted).toContain('Razorpay');
+    expect(redacted).toContain('Bengaluru, Karnataka');
+  });
+
+  it('applies ADDITIONAL_REDACTION_PATTERNS and can be disabled', () => {
+    expect(redactText('Lives on MG Road', { additionalPatterns: ['MG Road'] }).redacted).toBe('Lives on [REDACTED]');
+    expect(redactText(sample, { enabled: false }).redacted).toBe(sample);
+  });
+
+  it('does not treat a heading as a name', () => {
+    expect(detectName('Senior Software Engineer\nfoo')).toBeUndefined();
+    expect(detectName('Résumé\nfoo')).toBeUndefined();
+  });
+});
+
+describe('ResumeService.loadAndRedact (base64)', () => {
+  it('loads a text resume from RESUME_BASE64 and redacts it', async () => {
+    const text = 'Jane Q Doe\nPhone: +91 91234 56789\n7 years of experience with Java';
+    const result = await new ResumeService().loadAndRedact({ base64: Buffer.from(text).toString('base64') });
+    expect(result.redactedText).not.toContain('91234 56789');
+    expect(result.redactedText).not.toContain('Jane');
+    expect(result.metadata.yearsExperience).toBe(7);
+  });
+
+  it('rejects an empty resume with a clear error', async () => {
+    await expect(new ResumeService().loadAndRedact({ base64: Buffer.from('   ').toString('base64') })).rejects.toThrow(
+      'Resume is empty',
+    );
   });
 });

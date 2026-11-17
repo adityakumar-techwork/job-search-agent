@@ -2,38 +2,60 @@ name: Daily Agent Run
 
 on:
   schedule:
-    - cron: '0 16 * * *' # 8 AM PT (UTC-8) / 9 AM PDT (UTC-7) — runs at 16:00 UTC year-round
-  workflow_dispatch:      # allows manual trigger from GitHub Actions UI
+    - cron: '30 2 * * *' # 08:00 IST (UTC+5:30) daily
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# Never let two runs overlap (a manual dispatch during the scheduled run would double-spend quota).
+concurrency:
+  group: agent-run
+  cancel-in-progress: false
 
 jobs:
   run-agent:
     name: Run agent loop
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NODE_ENV: production
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+      # base64 of your resume PDF: `base64 -i resume.pdf | pbcopy` (macOS) / `base64 -w0 resume.pdf` (Linux)
+      RESUME_BASE64: ${{ secrets.RESUME_BASE64 }}
+      USER_CONTEXT: ${{ vars.USER_CONTEXT }}
+      JOB_TITLES: ${{ vars.JOB_TITLES }}
+      YEARS_EXPERIENCE: ${{ vars.YEARS_EXPERIENCE }}
+      PREFERRED_TECHNICAL_STACK: ${{ vars.PREFERRED_TECHNICAL_STACK }}
+      LOCATION_PRIORITY: ${{ vars.LOCATION_PRIORITY }}
+      EXCLUDE_KEYWORDS: ${{ vars.EXCLUDE_KEYWORDS }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Check required secrets
+        run: |
+          missing=""
+          for v in DATABASE_URL LLM_API_KEY RESUME_BASE64; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+
+      - name: Apply database schema
+        run: npm run db:migrate
 
       - name: Run agent
         run: npm run agent
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          RESUME_PATH: ${{ secrets.RESUME_PATH }}
-          NODE_ENV: production

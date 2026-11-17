@@ -1,21 +1,23 @@
-import { callGeminiWithRetry } from '../utils/gemini-retry';
-import axios from 'axios';
-import Anthropic from '@anthropic-ai/sdk';
-import { Tool } from '../types';
+import { callGemini } from '../utils/gemini-retry';
 import { logger } from '../utils/logger';
 
+// General-purpose LLM client used for the agent's free-text steps (daily strategy). The class
+// keeps its historical name; it talks to Gemini (see utils/gemini-retry.ts).
+export interface LlmOptions {
+  fallbackModels?: string[];
+  minIntervalMs?: number;
+}
+
 export class ClaudeService {
-  private readonly apiKey: string;
-  private readonly model: string;
-  private readonly maxTokens: number;
   private tokensInput = 0;
   private tokensOutput = 0;
 
-  constructor(apiKey: string, model: string, maxTokens: number) {
-    this.apiKey = apiKey;
-    this.model = model || 'gemini-3.8-flash';
-    this.maxTokens = maxTokens;
-  }
+  constructor(
+    private readonly apiKey: string,
+    private readonly model: string,
+    private readonly maxTokens: number,
+    private readonly opts: LlmOptions = {},
+  ) {}
 
   getTokenUsage(): { input: number; output: number } {
     return { input: this.tokensInput, output: this.tokensOutput };
@@ -28,37 +30,17 @@ export class ClaudeService {
 
   async call(prompt: string): Promise<string> {
     logger.info('Calling Gemini API', { model: this.model });
-    const res = await callGeminiWithRetry(this.apiKey, this.model,
+    const { text, usage } = await callGemini(
+      this.apiKey,
+      this.model,
       {
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: this.maxTokens },
       },
-      { timeout: 60000 },
+      { timeoutMs: 60_000, fallbackModels: this.opts.fallbackModels, minIntervalMs: this.opts.minIntervalMs },
     );
-    const usage = res.data?.usageMetadata ?? {};
     this.tokensInput += usage.promptTokenCount ?? 0;
     this.tokensOutput += usage.candidatesTokenCount ?? 0;
-    return res.data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
-  }
-
-  async callWithTools(prompt: string, _tools: Tool[]): Promise<Anthropic.Message> {
-    const text = await this.call(prompt);
-    return {
-      id: `gem_${Date.now()}`,
-      type: 'message',
-      role: 'assistant',
-      model: this.model,
-      content: [{ type: 'text', text, citations: null }],
-      stop_reason: 'end_turn',
-      stop_sequence: null,
-      usage: {
-        input_tokens: this.tokensInput,
-        output_tokens: this.tokensOutput,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        server_tool_use: null,
-        service_tier: 'standard',
-      },
-    } as unknown as Anthropic.Message;
+    return text;
   }
 }

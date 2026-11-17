@@ -3,24 +3,42 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Config } from '../types';
 
-// Token budget for daily agent run:
-// Resume: ~3K, Agent Memory: ~5K, Jobs: ~50K = 58K total
-// Context window: 200K, Safety margin: 150K
-// Proactive validation ensures we never exceed margin
+// .env.local wins over .env (dotenv never overwrites a variable that is already set, and real
+// environment variables — e.g. GitHub Actions secrets — win over both).
+if (process.env['NODE_ENV'] !== 'test') {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+  dotenv.config();
+}
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
-dotenv.config();
+export const DEFAULT_LLM_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_LLM_FALLBACK_MODELS = 'gemini-3.1-flash-lite,gemini-3.6-flash';
+export const DEFAULT_HUB_KEYWORDS =
+  'bangalore,bengaluru,karnataka,delhi,ncr,noida,gurgaon,gurugram,haryana,uttar pradesh';
 
-function requireEnv(key: string): string {
-  const value = process.env[key];
-  if (!value || value.trim() === '') {
-    throw new Error(`Missing required environment variable: ${key}`);
+function readEnv(key: string): string | undefined {
+  const v = process.env[key]?.trim();
+  return v ? v : undefined;
+}
+
+// First non-empty value among `keys` (new name first, legacy names after).
+function firstEnv(...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = readEnv(k);
+    if (v !== undefined) return v;
   }
-  return value.trim();
+  return undefined;
+}
+
+function requireAny(...keys: string[]): string {
+  const v = firstEnv(...keys);
+  if (v === undefined) {
+    throw new Error(`Missing required environment variable: ${keys[0]}`);
+  }
+  return v;
 }
 
 function optionalEnv(key: string, defaultValue = ''): string {
-  return process.env[key]?.trim() ?? defaultValue;
+  return readEnv(key) ?? defaultValue;
 }
 
 function parseCommaSeparated(value: string): string[] {
@@ -30,15 +48,17 @@ function parseCommaSeparated(value: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+function parseIntInRange(key: string, raw: string, min: number, max: number): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`${key} must be an integer between ${min} and ${max}`);
+  }
+  return n;
+}
+
 function validateDatabaseUrl(url: string): void {
   if (!url.startsWith('postgresql://') && !url.startsWith('postgres://')) {
     throw new Error('DATABASE_URL must start with postgresql:// or postgres://');
-  }
-}
-
-function validateClaudeApiKey(key: string): void {
-  if (key.length < 10) {
-    throw new Error('CLAUDE_API_KEY is invalid');
   }
 }
 
@@ -48,122 +68,148 @@ function validateEmail(email: string): void {
   }
 }
 
-function validateResumePath(resumePath: string, base64: string): void {
-  if (base64) return; // base64 provided, no need for file
+function validateResume(resumePath: string, base64: string): void {
+  if (base64) {
+    if (!/^[A-Za-z0-9+/=\s]+$/.test(base64) || Buffer.from(base64, 'base64').length === 0) {
+      throw new Error('RESUME_BASE64 is not valid base64');
+    }
+    return;
+  }
+  if (!resumePath) {
+    throw new Error('Set RESUME_PATH (local file) or RESUME_BASE64 (CI) — neither is set');
+  }
   const resolved = path.resolve(process.cwd(), resumePath);
   if (!fs.existsSync(resolved)) {
     throw new Error(`RESUME_PATH file not found: ${resolved}`);
   }
 }
 
-export function validateAndLoadConfig(): Config {
-  const databaseUrl = requireEnv('DATABASE_URL');
-  const claudeApiKey = requireEnv('CLAUDE_API_KEY');
-  const mailgunApiKey = requireEnv('MAILGUN_API_KEY');
-  const mailgunDomain = requireEnv('MAILGUN_DOMAIN');
-  const mailgunBaseUrl = requireEnv('MAILGUN_BASE_URL');
-  const recipientEmail = requireEnv('RECIPIENT_EMAIL');
-  const resumePath = requireEnv('RESUME_PATH');
-  const resumeBase64 = optionalEnv('RESUME_BASE64');
-
-  const claudeModel = optionalEnv('CLAUDE_MODEL', 'gemini-3.5-flash-lite');
-  const claudeMaxTokens = parseInt(optionalEnv('CLAUDE_MAX_TOKENS', '4096'), 10);
-  if (isNaN(claudeMaxTokens) || claudeMaxTokens < 1 || claudeMaxTokens > 32_000) {
-    throw new Error('CLAUDE_MAX_TOKENS must be an integer between 1 and 32000');
+function validateRegexes(patterns: string[]): void {
+  for (const p of patterns) {
+    try {
+      new RegExp(p, 'gi');
+    } catch {
+      throw new Error(`ADDITIONAL_REDACTION_PATTERNS contains an invalid regex: ${p}`);
+    }
   }
+}
 
-  const analysisDescMaxChars = parseInt(optionalEnv('ANALYSIS_DESC_MAX_CHARS', '3500'), 10);
-  if (isNaN(analysisDescMaxChars) || analysisDescMaxChars < 500 || analysisDescMaxChars > 20_000) {
-    throw new Error('ANALYSIS_DESC_MAX_CHARS must be an integer between 500 and 20000');
-  }
+export interface ConfigRequirements {
+  // The agent run reads the resume file; the API server and digest read the redacted copy from the DB.
+  requireResume?: boolean;
+  // The digest never calls the LLM.
+  requireLlm?: boolean;
+}
 
+export function validateAndLoadConfig(req: ConfigRequirements = {}): Config {
+  const { requireResume = true, requireLlm = true } = req;
+  const databaseUrl = requireAny('DATABASE_URL');
   validateDatabaseUrl(databaseUrl);
-  validateClaudeApiKey(claudeApiKey);
-  validateEmail(recipientEmail);
-  validateResumePath(resumePath, resumeBase64);
 
-  const patternConfidenceThreshold = parseFloat(
-    optionalEnv('PATTERN_CONFIDENCE_THRESHOLD', '0.5'),
-  );
-  if (
-    isNaN(patternConfidenceThreshold) ||
-    patternConfidenceThreshold < 0 ||
-    patternConfidenceThreshold > 1
-  ) {
+  // LLM_API_KEY is the canonical name; GEMINI_API_KEY / CLAUDE_API_KEY are accepted for
+  // backwards compatibility with older .env files and secrets.
+  const llmApiKey = requireLlm
+    ? requireAny('LLM_API_KEY', 'GEMINI_API_KEY', 'CLAUDE_API_KEY')
+    : firstEnv('LLM_API_KEY', 'GEMINI_API_KEY', 'CLAUDE_API_KEY') ?? '';
+  if (requireLlm && llmApiKey.length < 10) {
+    throw new Error('LLM_API_KEY looks invalid (too short)');
+  }
+  const llmModel = firstEnv('LLM_MODEL', 'CLAUDE_MODEL') ?? DEFAULT_LLM_MODEL;
+  if (llmModel.startsWith('claude')) {
+    throw new Error(`LLM_MODEL=${llmModel} is a Claude model, but this agent calls the Gemini API. Use a Gemini model ID.`);
+  }
+  const llmFallbackModels = parseCommaSeparated(optionalEnv('LLM_FALLBACK_MODELS', DEFAULT_LLM_FALLBACK_MODELS));
+  const llmMaxTokens = parseIntInRange('LLM_MAX_TOKENS', firstEnv('LLM_MAX_TOKENS', 'CLAUDE_MAX_TOKENS') ?? '4096', 1, 32_000);
+  const llmMinIntervalMs = parseIntInRange('LLM_MIN_INTERVAL_MS', optionalEnv('LLM_MIN_INTERVAL_MS', '1000'), 0, 60_000);
+  const analysisDescMaxChars = parseIntInRange('ANALYSIS_DESC_MAX_CHARS', optionalEnv('ANALYSIS_DESC_MAX_CHARS', '3500'), 500, 20_000);
+
+  const resumePath = optionalEnv('RESUME_PATH');
+  const resumeBase64 = optionalEnv('RESUME_BASE64');
+  if (requireResume) validateResume(resumePath, resumeBase64);
+
+  const recipientEmail = optionalEnv('RECIPIENT_EMAIL');
+  if (recipientEmail) validateEmail(recipientEmail);
+
+  const patternConfidenceThreshold = Number(optionalEnv('PATTERN_CONFIDENCE_THRESHOLD', '0.5'));
+  if (!Number.isFinite(patternConfidenceThreshold) || patternConfidenceThreshold < 0 || patternConfidenceThreshold > 1) {
     throw new Error('PATTERN_CONFIDENCE_THRESHOLD must be a number between 0 and 1');
   }
 
-  const yearsExperience = parseInt(optionalEnv('YEARS_EXPERIENCE', '0'), 10);
-  if (isNaN(yearsExperience) || yearsExperience < 0) {
-    throw new Error('YEARS_EXPERIENCE must be a non-negative integer');
-  }
-
-  const agentMemoryRetentionDays = parseInt(
+  const yearsExperience = parseIntInRange('YEARS_EXPERIENCE', optionalEnv('YEARS_EXPERIENCE', '0'), 0, 60);
+  const agentMemoryRetentionDays = parseIntInRange(
+    'AGENT_MEMORY_RETENTION_DAYS',
     optionalEnv('AGENT_MEMORY_RETENTION_DAYS', '90'),
-    10,
+    1,
+    3650,
   );
-  if (isNaN(agentMemoryRetentionDays) || agentMemoryRetentionDays < 1) {
-    throw new Error('AGENT_MEMORY_RETENTION_DAYS must be a positive integer');
-  }
 
-  const additionalPatternsRaw = optionalEnv('ADDITIONAL_REDACTION_PATTERNS', '');
-  const additionalRedactionPatterns = additionalPatternsRaw
-    ? parseCommaSeparated(additionalPatternsRaw)
-    : [];
+  const additionalRedactionPatterns = parseCommaSeparated(optionalEnv('ADDITIONAL_REDACTION_PATTERNS', ''));
+  validateRegexes(additionalRedactionPatterns);
+
+  const locationPriority = parseCommaSeparated(optionalEnv('LOCATION_PRIORITY', 'bangalore-ncr,remote,other'));
+  const knownCategories = new Set(['bangalore-ncr', 'remote', 'other']);
+  const unknown = locationPriority.filter((l) => !knownCategories.has(l));
+  if (unknown.length > 0) {
+    throw new Error(
+      `LOCATION_PRIORITY has unknown categories: ${unknown.join(', ')} (allowed: bangalore-ncr, remote, other)`,
+    );
+  }
 
   return {
     databaseUrl,
-    claudeApiKey,
-    claudeModel,
-    claudeMaxTokens,
+    llmApiKey,
+    llmModel,
+    llmFallbackModels,
+    llmMaxTokens,
+    llmMinIntervalMs,
     analysisDescMaxChars,
     userContext: optionalEnv('USER_CONTEXT', ''),
-    mailgunApiKey,
-    mailgunDomain,
-    mailgunBaseUrl,
+    mailgunApiKey: optionalEnv('MAILGUN_API_KEY'),
+    mailgunDomain: optionalEnv('MAILGUN_DOMAIN'),
+    mailgunBaseUrl: optionalEnv('MAILGUN_BASE_URL', 'https://api.mailgun.net'),
     recipientEmail,
+    dashboardUrl: optionalEnv('DASHBOARD_URL', 'http://localhost:3000'),
     resumePath,
     resumeBase64: resumeBase64 || undefined,
     nodeEnv: optionalEnv('NODE_ENV', 'development'),
-    jobTitles: parseCommaSeparated(
-      optionalEnv('JOB_TITLES', 'Senior Software Engineer'),
-    ),
-    locationPriority: parseCommaSeparated(
-      optionalEnv('LOCATION_PRIORITY', 'bangalore-ncr,remote,other'),
-    ),
+    jobTitles: parseCommaSeparated(optionalEnv('JOB_TITLES', 'Senior Software Engineer')),
+    locationPriority,
     locationKeywords: {
-      remote: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_REMOTE', 'remote')),
-      washington: parseCommaSeparated(
-        optionalEnv(
-          'LOCATION_KEYWORDS_WASHINGTON',
-          'bangalore,bengaluru,karnataka,delhi,ncr,noida,gurgaon,gurugram,haryana,uttar pradesh',
-        ),
-      ),
-      other: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_OTHER', '')),
+      remote: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_REMOTE', 'remote')).map((s) => s.toLowerCase()),
+      hub: parseCommaSeparated(
+        firstEnv('LOCATION_KEYWORDS_HUB', 'LOCATION_KEYWORDS_WASHINGTON') ?? DEFAULT_HUB_KEYWORDS,
+      ).map((s) => s.toLowerCase()),
+      other: parseCommaSeparated(optionalEnv('LOCATION_KEYWORDS_OTHER', '')).map((s) => s.toLowerCase()),
     },
     yearsExperience,
-    preferredCompanyStage: parseCommaSeparated(
-      optionalEnv('PREFERRED_COMPANY_STAGE', ''),
-    ),
-    excludeKeywords: parseCommaSeparated(optionalEnv('EXCLUDE_KEYWORDS', '')),
-    preferredTechnicalStack: parseCommaSeparated(
-      optionalEnv('PREFERRED_TECHNICAL_STACK', ''),
-    ),
+    preferredCompanyStage: parseCommaSeparated(optionalEnv('PREFERRED_COMPANY_STAGE', '')),
+    excludeKeywords: parseCommaSeparated(optionalEnv('EXCLUDE_KEYWORDS', '')).map((s) => s.toLowerCase()),
+    preferredTechnicalStack: parseCommaSeparated(optionalEnv('PREFERRED_TECHNICAL_STACK', '')),
     jobFetchTime: optionalEnv('JOB_FETCH_TIME', '08:00'),
     jobFetchTimezone: optionalEnv('JOB_FETCH_TIMEZONE', 'Asia/Kolkata'),
     weeklyDigestDay: optionalEnv('WEEKLY_DIGEST_DAY', 'sunday'),
     weeklyDigestTime: optionalEnv('WEEKLY_DIGEST_TIME', '18:00'),
-    weeklyDigestTimezone: optionalEnv(
-      'WEEKLY_DIGEST_TIMEZONE',
-      'Asia/Kolkata',
-    ),
+    weeklyDigestTimezone: optionalEnv('WEEKLY_DIGEST_TIMEZONE', 'Asia/Kolkata'),
     enablePiiRedaction: optionalEnv('ENABLE_PII_REDACTION', 'true') !== 'false',
     additionalRedactionPatterns,
     agentMemoryRetentionDays,
-    enablePatternLearning:
-      optionalEnv('ENABLE_PATTERN_LEARNING', 'true') !== 'false',
+    enablePatternLearning: optionalEnv('ENABLE_PATTERN_LEARNING', 'true') !== 'false',
     patternConfidenceThreshold,
     rapidApiKey: optionalEnv('RAPIDAPI_KEY'),
-    useBatchApi: optionalEnv('USE_BATCH_API', 'false') !== 'false',
   };
+}
+
+// The weekly digest is the only entry point that sends email; the agent run and API server
+// must not fail just because Mailgun isn't configured.
+export function requireEmailConfig(config: Config): void {
+  const missing = [
+    ['MAILGUN_API_KEY', config.mailgunApiKey],
+    ['MAILGUN_DOMAIN', config.mailgunDomain],
+    ['RECIPIENT_EMAIL', config.recipientEmail],
+  ]
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variable(s) for the digest: ${missing.join(', ')}`);
+  }
 }

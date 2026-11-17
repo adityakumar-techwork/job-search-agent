@@ -12,3 +12,9 @@ node_modules/
 data/*
 !data/resume.example.txt
 dist/
+!.env.example
+resume.pdf
+resume.txt
+*.resume.pdf
+logs/
+coverage/

@@ -3,6 +3,7 @@
   "datePosted": "3days",
   "maxRequestsPerRun": 6,
   "minReserve": 15,
+  "country": "in",
   "locations": [
     "Bengaluru, India",
     "Gurgaon, India",

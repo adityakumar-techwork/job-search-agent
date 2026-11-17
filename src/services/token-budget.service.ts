@@ -23,9 +23,9 @@ function estimateTokens(text: string): number {
 // Slots are distributed using triangular weights — highest-priority location
 // gets the most slots and each subsequent one gets progressively fewer.
 // Example with 3 priorities (weights 3:2:1, total weight 6):
-//   remote     → 15 jobs (50%)
-//   washington → 10 jobs (33%)
-//   other      →  5 jobs (17%)
+//   bangalore-ncr → 15 jobs (50%)
+//   remote        → 10 jobs (33%)
+//   other         →  5 jobs (17%)
 
 export class TokenBudgetService {
   private readonly maxContextTokens = 200_000;
